@@ -357,11 +357,11 @@ final class MannyService implements MannyTaskRuntime
             fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
             fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
             fn(Manny $manny): mixed => $this->mannies->save($manny),
-            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(SectorCoordinates $coordinates, array $ids, callable $change): mixed => $this->sectors->changeMineablesAfterCommit($coordinates, $ids, $change),
             fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
             fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
-            fn(string $oldObjectId, string $newObjectId): mixed => $this->mannies->replaceObjectIdReferences($oldObjectId, $newObjectId),
+            fn(string $operation, string $oldId, string $newId): string => $this->sectors->replaceMineableIdentity($operation, $oldId, $newId),
         );
         $this->refuelMotorizedAsteroidTaskHandler = new RefuelMotorizedAsteroidTaskHandler(
             fn(NeumannProbe $probe): mixed => $this->ensureProbeAcceptsMannyOrders($probe),
@@ -378,7 +378,7 @@ final class MannyService implements MannyTaskRuntime
             fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
             fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
             fn(Manny $manny): mixed => $this->mannies->save($manny),
-            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(SectorCoordinates $coordinates, array $ids, callable $change): mixed => $this->sectors->changeMineablesAfterCommit($coordinates, $ids, $change),
             fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
             fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
@@ -395,7 +395,7 @@ final class MannyService implements MannyTaskRuntime
             fn(Manny $manny): mixed => $this->storage->releaseMannyFromStorage($manny),
             fn(Manny $manny): mixed => $this->removeMannyFromSector($manny),
             fn(Manny $manny): mixed => $this->mannies->save($manny),
-            fn(SectorContent $sector): mixed => $this->sectors->saveSector($sector),
+            fn(SectorCoordinates $coordinates, array $ids, callable $change): mixed => $this->sectors->changeMineablesAfterCommit($coordinates, $ids, $change),
             fn(Manny $manny, array $payload): mixed => $this->clearTask($manny, $payload),
             fn(Manny $manny, string $state): mixed => $this->registerMannyInSector($manny, $state),
             fn(int $mannyId): ?Manny => $this->mannies->findById($mannyId),
@@ -2507,6 +2507,19 @@ final class MannyService implements MannyTaskRuntime
                 'message' => 'Manny report: an artificial auxiliary structure was identified. ' . ($recovered > 0.0 ? number_format($recovered, 4, '.', '') . ' ECE of deuterium was transferred to the probe.' : 'No deuterium could be transferred.'),
             ];
         }
+        if ($construct->getSubtype() === DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK) {
+            return $this->sectors->changeMineablesAfterCommit($sector->getCoordinates(), [$construct->getId()], function (SectorContent $current) use ($probe, $construct): array {
+                $wreck = $current->findObjectById($construct->getId());
+                if (!$wreck instanceof DormantConstruct) { throw new \RuntimeException('The inspected wreck changed before its structural lock was acquired.'); }
+                $scenario = $wreck->getInspectionScenario();
+                if ($scenario === null) {
+                    $scenarios = DormantConstruct::generatableInspectionScenarios();
+                    $scenario = $scenarios[random_int(0, count($scenarios) - 1)];
+                    $current->replaceObject($wreck->withInspectionScenario($scenario));
+                }
+                return $this->dormantConstructScenarioReport($probe, $scenario);
+            });
+        }
         $scenario = $construct->getInspectionScenario();
         if ($scenario === null) {
             $scenarios = DormantConstruct::generatableInspectionScenarios();
@@ -2517,6 +2530,11 @@ final class MannyService implements MannyTaskRuntime
             }
         }
 
+        return $this->dormantConstructScenarioReport($probe, $scenario);
+    }
+
+    private function dormantConstructScenarioReport(NeumannProbe $probe, string $scenario): array
+    {
         $this->improvements?->markAvailable($probe->id, $scenario);
 
         $report = [
@@ -2789,13 +2807,9 @@ final class MannyService implements MannyTaskRuntime
             return $amount;
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        $object = $sector->findObjectById($objectId);
-        if (!$object instanceof Asteroid && !$object instanceof DormantConstruct) {
-            return $amount;
-        }
-
-        $currentAmounts = $object->getResourceAmounts();
+        $stock = $this->sectors->lockMineableForMining($manny->sector, $objectId);
+        if ($stock === null) { return 0.0; }
+        $currentAmounts = $stock['amounts'];
         $requestedAmounts = $this->resourceAmountsForTotal($amount, $profile);
         $actualAmount = $this->extractableTotalAmount($currentAmounts, $requestedAmounts, $amount);
         if ($actualAmount <= 0.0) {
@@ -2803,13 +2817,7 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $extractedAmounts = $this->resourceAmountsForTotal($actualAmount, $profile);
-        foreach ($extractedAmounts as $type => $extractedAmount) {
-            $currentAmounts[$type] = round(max(0.0, (float) ($currentAmounts[$type] ?? 0.0) - $extractedAmount), 4);
-        }
-
-        if ($sector->replaceObject($object->withResourceAmounts($currentAmounts))) {
-            $this->sectors->saveSector($sector);
-        }
+        $this->sectors->mineableStocks()->debit($objectId, $extractedAmounts);
 
         return $actualAmount;
     }
@@ -3220,70 +3228,36 @@ final class MannyService implements MannyTaskRuntime
             return;
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        $object = new SectorManny(
-            SectorManny::objectIdForUid($manny->uid),
-            $manny->name,
-            $manny->uid,
-            $state,
-            $this->mannyCargoArray($manny),
-            $state === SectorManny::STATE_FORGOTTEN
-                ? 'Manny left behind by its probe.'
-                : 'Manny abandoned in open space.',
-        );
-
-        if (!$sector->replaceObject($object)) {
-            $sector->addObject($object);
-        }
-        $this->sectors->saveSector($sector);
+        $this->mannies->setForgotten($manny, $state === SectorManny::STATE_FORGOTTEN);
+        if ($state === SectorManny::STATE_FORGOTTEN) { return; }
+        $this->sectors->publishAbandonedManny($manny->sector, new SectorManny(
+            SectorManny::objectIdForUid($manny->uid), $manny->name, $manny->uid,
+            SectorManny::STATE_ABANDONED, $this->mannyCargoArray($manny), 'Manny abandoned in open space.',
+        ));
     }
 
     private function recoverForgottenManniesInCurrentSector(NeumannProbe $probe): void
     {
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $changed = false;
-        foreach ($sector->getObjects() as $object) {
-            if (!$object instanceof SectorManny || $object->getState() !== SectorManny::STATE_FORGOTTEN) {
-                continue;
+        $this->withProbeLock($probe, function (NeumannProbe $probe): void {
+            foreach ($this->mannies->findForgottenBySector($probe->currentSector, $probe->id) as $candidate) {
+                $this->mannies->withMannyLock($candidate->id, function (Manny $manny) use ($probe): void {
+                    if (!$manny->isForgotten || $manny->probeId !== $probe->id
+                        || $manny->locationType !== Manny::LOCATION_SECTOR || !$manny->isInSameSectorAs($probe)
+                        || $manny->currentTask !== null) { return; }
+                    $this->storage->lockMannyPlacement($probe);
+                    if (!$this->storage->placeMannyOnProbe($probe, $manny)) { return; }
+                    $manny->locationType = Manny::LOCATION_PROBE;
+                    $manny->sector = null;
+                    $this->clearTask($manny);
+                    $this->mannies->save($manny);
+                });
             }
-
-            $manny = $this->mannies->findByUidForProbe($probe->id, $object->getMannyUid());
-            if (
-                $manny === null
-                || !$manny->isInSameSectorAs($probe)
-                || $manny->currentTask !== null
-                || $manny->isOnProbe()
-            ) {
-                continue;
-            }
-
-            if (!$this->storage->placeMannyOnProbe($probe, $manny)) {
-                continue;
-            }
-
-            $sector->removeObjectById($object->getId());
-            $manny->locationType = Manny::LOCATION_PROBE;
-            $manny->sector = null;
-            $this->clearTask($manny);
-            $this->mannies->save($manny);
-            $changed = true;
-        }
-
-        if ($changed) {
-            $this->sectors->saveSector($sector);
-        }
+        });
     }
 
     private function removeMannyFromSector(Manny $manny): void
     {
-        if ($manny->sector === null) {
-            return;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        if ($sector->removeObjectById(SectorManny::objectIdForUid($manny->uid))) {
-            $this->sectors->saveSector($sector);
-        }
+        $this->mannies->setForgotten($manny, false);
     }
 
     private function clearTask(Manny $manny, array $payload = []): void

@@ -22,6 +22,7 @@ use VonNeumannGame\Domain\ProbeStatus;
 use VonNeumannGame\Domain\ProbeItem;
 use VonNeumannGame\Domain\CraftingRecipeCatalog;
 use VonNeumannGame\Sector\SectorCoordinates;
+use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorGrid;
 use VonNeumannGame\Sector\SectorService;
 use VonNeumannGame\Sector\Planet;
@@ -665,7 +666,7 @@ final class OthersService
         if ($auxiliary['current_action_id'] !== null || !in_array((string) $auxiliary['status'], ['inactive', 'available'], true) || $auxiliary['location_type'] !== 'embarked') { throw new OthersActionException(409, 'others_auxiliary_busy', 'The auxiliary is not available and embarked.'); }
         $selection = ResourceComposition::normalizeSelection($resources);
         $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        $sector = $this->sectorChanges->getOrCreateSector($sectorCoordinates); $object = $sector->findObjectById($objectId);
+        $sector = $this->sectors->getOrCreateSector($sectorCoordinates); $object = $sector->findObjectById($objectId);
         if (!$object instanceof Planet && !$object instanceof Asteroid && !($object instanceof DormantConstruct && $object->getSubtype() !== null)) { throw new OthersActionException(404, 'target_not_found', 'Mineable sector object not found.'); }
         $amounts = method_exists($object, 'getResourceAmounts') ? $object->getResourceAmounts() : [];
         $profile = ResourceComposition::profileForSelection($amounts, $selection);
@@ -947,18 +948,32 @@ final class OthersService
         if (!$ship) { $this->failAuxiliaryAction($action, $now, 'carrier_unavailable'); return; }
         $payload = json_decode((string) $action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
         $coordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
-        $sector = $this->sectorChanges->getOrCreateSector($coordinates); $object = $sector->findObjectById((string) $payload['objectId']);
+        $sector = $this->sectors->getOrCreateSector($coordinates); $object = $sector->findObjectById((string) $payload['objectId']);
+        if ($object !== null && !\VonNeumannGame\Sector\MineableDescriptors::covers($object->toArray())) {
+            $sector = $this->sectorChanges->getOrCreateSector($coordinates);
+            $object = $sector->findObjectById((string) $payload['objectId']);
+        }
         if (!$object instanceof Planet && !$object instanceof Asteroid && !$object instanceof DormantConstruct) { $this->failAuxiliaryAction($action, $now, 'target_unavailable'); return; }
-        $remaining = $object->getResourceAmounts(); $profile = $payload['profile']; $requested = (float) $payload['amount']; $extracted = []; $total = 0.0;
+        $sqlStock = \VonNeumannGame\Sector\MineableDescriptors::covers($object->toArray());
+        $stock = $sqlStock ? $this->sectors->lockMineableForMining($coordinates, $object->getId()) : null;
+        if ($sqlStock && $stock === null) { $this->failAuxiliaryAction($action, $now, 'target_unavailable'); return; }
+        $remaining = $sqlStock ? $stock['amounts'] : $object->getResourceAmounts();
+        $profile = $payload['profile']; $requested = (float) $payload['amount']; $extracted = []; $total = 0.0;
         foreach (ResourceComposition::TYPES as $type) {
             $take = round(min((float) ($remaining[$type] ?? 0.0), $requested * (float) ($profile[$type] ?? 0.0)), 4);
             $extracted[$type] = $take; $remaining[$type] = round(max(0.0, (float) ($remaining[$type] ?? 0.0) - $take), 4); $total += $take;
         }
         if ($total <= 0.0) { $this->failAuxiliaryAction($action, $now, 'resources_exhausted'); return; }
-        $replacement = $object instanceof Planet ? $object->withResourceAmounts($remaining) : $object->withResourceAmounts($remaining);
-        $sector->replaceObject($replacement); $this->sectorChanges->saveSector($sector);
-        $this->persistence->production->finishAuxiliaryMining(['deuterium' => $extracted['deuterium'], 'metals' => $extracted['metals'], 'ice' => $extracted['ice'], 'carbon' => $extracted['carbon_compounds'], 'now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
-        $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'mined', 'amounts' => $extracted], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        if ($sqlStock) {
+            $this->sectors->mineableStocks()->debit($object->getId(), $extracted);
+        } else {
+            $sector->replaceObject($object->withResourceAmounts($remaining));
+            $this->sectorChanges->saveSector($sector);
+        }
+        $delivered = $this->persistence->production->finishAuxiliaryMining(['deuterium' => $extracted['deuterium'], 'metals' => $extracted['metals'], 'ice' => $extracted['ice'], 'carbon' => $extracted['carbon_compounds'], 'now' => $now, 'id' => (int) $action['auxiliary_id'], 'action_id' => (int) $action['id']]);
+        if ($delivered !== 1) { throw new \RuntimeException('Others mining recipient no longer owns this action.'); }
+        $completed = $this->persistence->action->finishFuelTransfer(['result' => json_encode(['outcome' => 'mined', 'amounts' => $extracted], JSON_THROW_ON_ERROR), 'now' => $now, 'id' => (int) $action['id']]);
+        if ($completed !== 1) { throw new \RuntimeException('Others mining action is no longer queued.'); }
     }
 
     private function completeAuxiliaryRecall(array $action, string $now): void
@@ -1363,14 +1378,15 @@ final class OthersService
                 $this->persistence->combat->destroyAsteroid(['now' => $now, 'id' => $trajectoryId]);
                 $this->events->cancelPending(SchedulerService::ASTEROID_TRAJECTORY_PHASE, 'asteroid_trajectory', $trajectoryId);
                 if ($this->sectors !== null) {
-                    $sector = $this->sectorChanges->getOrCreateSector(new SectorCoordinates((int) $projectile['sector_x'], (int) $projectile['sector_y'], (int) $projectile['sector_z']));
-                    $changed = $sector->removeObjectById((string) $target['id']);
-                    $hadContainers = $sector->containersForObject((string) $target['id']) !== [];
-                    $sector->removeContainersForObject((string) $target['id']);
-                    $changed = $hadContainers || $changed;
-                    if ($changed) {
-                        $this->sectorChanges->saveSector($sector);
-                    }
+                    $this->sectors->changeMineablesAfterCommit(
+                        new SectorCoordinates((int) $projectile['sector_x'], (int) $projectile['sector_y'], (int) $projectile['sector_z']),
+                        [(string) $target['id']],
+                        function (SectorContent $sector) use ($target): void {
+                            $this->sectors->mineableStocks()->delete((string) $target['id']);
+                            $sector->removeObjectById((string) $target['id']);
+                            $sector->removeContainersForObject((string) $target['id']);
+                        },
+                    );
                 }
             }
             return ['damage' => 1, 'hits' => $hits, 'destroyed' => $hits >= 3];
@@ -1536,9 +1552,10 @@ final class OthersService
             Config::float($this->gameplayConfig, 'others.mothershipWreck.radiusMeters', DormantConstruct::OTHERS_MOTHERSHIP_WRECK_RADIUS_METERS),
         );
         $sectorCoordinates = new SectorCoordinates((int) $ship['sector_x'], (int) $ship['sector_y'], (int) $ship['sector_z']);
+        $wreck = $this->sectors->createMineable($sectorCoordinates, 'mothership-wreck-' . $ship['public_id'], $wreck);
         $sector = $this->sectorChanges->getOrCreateSector($sectorCoordinates);
-        if ($sector->findObjectById($wreck->getId()) === null) {
-            $sector->addObject($wreck);
+        if (!$sector->hasAppliedEffect('wreck-items-' . $ship['public_id'])) {
+            $sector->markEffectApplied('wreck-items-' . $ship['public_id']);
             foreach ($driftingItems as $item) {
                 if (!is_array($item) || ($item['type'] ?? null) !== ProbeItem::TYPE_MISSILE || (int) ($item['quantity'] ?? 0) <= 0) {
                     continue;
@@ -1557,7 +1574,7 @@ final class OthersService
                     ));
                 }
             }
-            $this->sectorChanges->saveSector($sector);
+            $this->sectorChanges->saveSector($sector, 'wreck-items-' . $ship['public_id']);
         }
 
         $this->createMothershipWreckAlerts($sectorCoordinates, $wreck, $cause);

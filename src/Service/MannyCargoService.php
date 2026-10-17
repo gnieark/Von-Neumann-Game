@@ -198,15 +198,9 @@ final class MannyCargoService
             return;
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        $this->addDriftingItemToSector(
-            $sector,
-            (string) $reservedItem['type'],
-            (string) $reservedItem['name'],
-            (float) $reservedItem['containerSpace'],
-            (int) $reservedItem['quantity'],
-        );
-        $this->sectors->saveSector($sector);
+        $this->sectors->changeObjectsAfterCommit($manny->sector, function (SectorContent $sector) use ($reservedItem): void {
+            $this->addDriftingItemToSector($sector, (string) $reservedItem['type'], (string) $reservedItem['name'], (float) $reservedItem['containerSpace'], (int) $reservedItem['quantity']);
+        });
     }
 
     /**
@@ -593,7 +587,6 @@ final class MannyCargoService
         $this->clearTask($recovered);
         $this->mannies->save($recovered);
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
         $object = new SectorManny(
             SectorManny::objectIdForUid($recovered->uid),
             $recovered->name,
@@ -602,10 +595,7 @@ final class MannyCargoService
             $this->mannyCargoArray($recovered),
             'Manny abandoned after its carrier dropped cargo.',
         );
-        if (!$sector->replaceObject($object)) {
-            $sector->addObject($object);
-        }
-        $this->sectors->saveSector($sector);
+        $this->sectors->publishAbandonedManny($manny->sector, $object);
 
         return [
             'type' => 'manny',
@@ -733,14 +723,7 @@ final class MannyCargoService
 
     private function removeMannyFromSector(Manny $manny): void
     {
-        if ($manny->sector === null) {
-            return;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
-        if ($sector->removeObjectById(SectorManny::objectIdForUid($manny->uid))) {
-            $this->sectors->saveSector($sector);
-        }
+        $this->mannies->setForgotten($manny, false);
     }
 
     private function addDriftingItemToSector(SectorContent $sector, string $itemType, string $name, float $containerSpace, int $quantity): SectorDriftingItem

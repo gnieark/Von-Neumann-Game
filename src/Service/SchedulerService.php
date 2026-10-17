@@ -102,8 +102,7 @@ final class SchedulerService
     private function processSectorEffect(ScheduledEvent $event): bool
     {
         if ($this->sectorEffects === null || $event->entityType !== 'sector_effect') { throw new \RuntimeException('Sector effect service unavailable or invalid event.'); }
-        $this->sectorEffects->apply($event->entityId);
-        return true;
+        return $this->sectorEffects->applyScheduled($event);
     }
 
     private function processAnomalyBroadcast(ScheduledEvent $event): bool

@@ -47,7 +47,7 @@ use VonNeumannGame\Service\Storage\TransferLoadPlanner;
     $coordinates = new SectorCoordinates(3,4,5);
     $files->save(new SectorContent($coordinates));
     $depots = new GerminationDepotRepository($db);
-    $sectors = new SectorService($files,new SectorContentGenerator(),'storage-test',germinationDepots:$depots);
+    $sectors = new SectorService($files,new SectorContentGenerator(),'storage-test',pdo:$db,germinationDepots:$depots);
     $transaction=new StorageTransaction($db);$locks=new StorageLockRepository($db);$transferRows=new SectorStorageTransferRepository($db);$inventoryTransfers=new InventoryTransferRepositoryFactory($db);$detached=new DetachedStorageContainerRepository($db);
     $effects = new SectorEffectService(new SectorEffectRepository($db),$events,$sectors);
     $waves = new AnomalyBroadcastService(new AnomalyBroadcastRepository($db),$transaction,$locks,$events,new OthersAuditRepository($db));

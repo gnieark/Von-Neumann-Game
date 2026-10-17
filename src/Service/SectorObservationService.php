@@ -104,7 +104,7 @@ final class SectorObservationService
         $requiredSeconds = $skipInitialNeighborDelay
             ? 0
             : $this->requiredResidenceSeconds($distance);
-        $content = $this->abandonOrphanedForgottenMannies($this->sectors->getOrCreateSector($target));
+        $content = $this->sectors->getOrCreateSector($target);
         $current = $probe->currentSector->equals($target);
         $scan = $this->scanMetadata($residenceSeconds, $requiredSeconds);
 
@@ -403,11 +403,13 @@ final class SectorObservationService
         }
 
         if ($isCurrentSector && $this->asteroidTrajectories !== null && $this->asteroidTrajectoryService !== null) {
-            foreach ($this->asteroidTrajectories->findActiveInSector($content->getCoordinates()) as $trajectory) {
+            $trajectories = $this->asteroidTrajectories->findActiveInSector($content->getCoordinates());
+            $stocks = $this->sectors->mineableStocks()->findMany(array_map(static fn($trajectory): string => $trajectory->asteroidId, $trajectories));
+            foreach ($trajectories as $trajectory) {
                 if ($trajectory->mode !== \VonNeumannGame\Domain\AsteroidTrajectory::MODE_SECTOR_TRANSFER || $content->findObjectById($trajectory->asteroidId) !== null) {
                     continue;
                 }
-                $asteroid = Asteroid::fromArray($trajectory->asteroidSnapshot);
+                $asteroid = Asteroid::fromDescriptor($trajectory->asteroidSnapshot)->withResourceAmounts($stocks[$trajectory->asteroidId]['amounts']);
                 $public = $this->detailedObject($asteroid, $content->getCoordinates(), $relativeCoordinates, $includeOthersHarvestability);
                 $public['inTransit'] = true;
                 $public['trajectory'] = $this->asteroidTrajectoryService->publicArray($trajectory);
@@ -441,35 +443,6 @@ final class SectorObservationService
         }
 
         return $planets;
-    }
-
-    private function abandonOrphanedForgottenMannies(SectorContent $content): SectorContent
-    {
-        if ($this->mannies === null) {
-            return $content;
-        }
-
-        $changed = false;
-        foreach ($content->getObjects() as $object) {
-            if (
-                !$object instanceof SectorManny
-                || $object->getState() !== SectorManny::STATE_FORGOTTEN
-                || $this->mannies->hasExistingOwnerForUid($object->getMannyUid())
-            ) {
-                continue;
-            }
-
-            $changed = $content->replaceObject($object->withState(
-                SectorManny::STATE_ABANDONED,
-                'Manny abandoned after its owner account disappeared.',
-            )) || $changed;
-        }
-
-        if ($changed) {
-            $this->sectors->saveSector($content);
-        }
-
-        return $content;
     }
 
     private function minableTargets(

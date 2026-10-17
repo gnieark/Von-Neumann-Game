@@ -292,7 +292,7 @@ final class Asteroid extends UniverseObject
             $data['description'] ?? null,
             isset($data['resourceAmounts']) && is_array($data['resourceAmounts'])
                 ? $data['resourceAmounts']
-                : null,
+                : \VonNeumannGame\Domain\MineableResourceAmounts::zero(),
             is_array($data['waypointBookmarks'] ?? null) ? $data['waypointBookmarks'] : [],
             motorized: $motorized,
             motorFuelStatus: $motorFuelStatus,

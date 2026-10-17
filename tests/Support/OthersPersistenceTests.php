@@ -138,7 +138,7 @@ require_once __DIR__ . '/StorageTestPdo.php';
         $legacyCoordinates = new \VonNeumannGame\Sector\SectorCoordinates(17, 18, 19);
         $files->save(new \VonNeumannGame\Sector\SectorContent($legacyCoordinates));
         $legacy->prepare("INSERT INTO others_cross_store_operations(public_id,operation_type,payload_json,sql_applied,sector_applied,status,created_at,updated_at) VALUES('legacy-pending','dormant_auxiliaries',?,1,0,'pending',?,?)")->execute([json_encode(['shipId' => 'removed-legacy-carrier', 'sector' => ['x' => 17, 'y' => 18, 'z' => 19], 'auxiliaryIds' => ['legacy-auxiliary']], JSON_THROW_ON_ERROR), $now, $now]);
-        $legacySectors = new \VonNeumannGame\Sector\SectorService($files, new \VonNeumannGame\Sector\SectorContentGenerator(), 'migration-test');
+        $legacySectors = new \VonNeumannGame\Sector\SectorService($files, new \VonNeumannGame\Sector\SectorContentGenerator(), 'migration-test', pdo: $legacy);
         $legacyMigration = new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($legacy, $legacySectors);
         $test->assertEquals(1, $legacyMigration->run(false)['pendingOperations'], 'legacy migration audits a pending committed cross-store operation');
         $test->assertEquals([], $files->load($legacyCoordinates)->getObjects(), 'migration dry run does not publish sector objects');

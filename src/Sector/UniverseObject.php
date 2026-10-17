@@ -60,6 +60,16 @@ abstract class UniverseObject
         return self::fromArray($data);
     }
 
+    public function toDescriptor(): array
+    {
+        return MineableDescriptors::descriptor($this->toArray());
+    }
+
+    public static function fromDescriptor(array $data): UniverseObject
+    {
+        return self::fromArray(MineableDescriptors::decode($data));
+    }
+
     public function toArray(): array
     {
         $data = [

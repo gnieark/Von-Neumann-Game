@@ -78,6 +78,51 @@ final class MannyRepository
         return $stmt->fetchAll();
     }
 
+    /** Sector-indexed read, including missing owners for explicit diagnosis. No per-Manny query. */
+    public function findForgottenBySector(SectorCoordinates $sector, ?int $probeId = null): array
+    {
+        $sql = $this->taskJoinSql('m.is_forgotten = 1 AND m.sector_x = :x AND m.sector_y = :y AND m.sector_z = :z');
+        $parameters = ['x' => $sector->getX(), 'y' => $sector->getY(), 'z' => $sector->getZ()];
+        if ($probeId !== null) { $sql .= ' AND m.probe_id = :probe'; $parameters['probe'] = $probeId; }
+        $statement = $this->pdo->prepare($sql . ' ORDER BY m.id');
+        $statement->execute($parameters);
+        return array_map($this->hydrate(...), $statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public function forgottenProjections(SectorCoordinates $sector): array
+    {
+        return array_map(function (Manny $manny): \VonNeumannGame\Sector\SectorManny {
+            return new \VonNeumannGame\Sector\SectorManny(
+                \VonNeumannGame\Sector\SectorManny::objectIdForUid($manny->uid), $manny->name, $manny->uid,
+                \VonNeumannGame\Sector\SectorManny::STATE_FORGOTTEN,
+                array_replace($manny->cargoArray(), ['capacity' => max(0.0001, Config::float($this->config, 'manny.cargoCapacity', Manny::CARGO_CAPACITY))]),
+                'Manny left behind by its probe.',
+            );
+        }, $this->findForgottenBySector($sector));
+    }
+
+    /** Explicit transition: ordinary saves must not restore a stale forgotten flag. */
+    public function setForgotten(Manny $manny, bool $forgotten): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Forgotten transitions require a transaction.'); }
+        $sql = 'UPDATE mannies SET is_forgotten = :forgotten WHERE id = :id';
+        $parameters = ['forgotten' => (int) $forgotten, 'id' => $manny->id];
+        if ($forgotten) {
+            $sql .= " AND probe_id = :probe AND location_type = 'sector' AND sector_x = :x AND sector_y = :y AND sector_z = :z";
+            $parameters += ['probe' => $manny->probeId, 'x' => $manny->sector?->getX(), 'y' => $manny->sector?->getY(), 'z' => $manny->sector?->getZ()];
+        }
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute($parameters);
+        $manny->isForgotten = $forgotten;
+    }
+
+    public function markSectorForgottenForProbe(NeumannProbe $probe, bool $forgotten): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Departure transitions require a transaction.'); }
+        $statement = $this->pdo->prepare("UPDATE mannies SET is_forgotten = ? WHERE probe_id = ? AND location_type = 'sector' AND sector_x = ? AND sector_y = ? AND sector_z = ?");
+        $statement->execute([(int) $forgotten, $probe->id, $probe->currentSector->getX(), $probe->currentSector->getY(), $probe->currentSector->getZ()]);
+    }
+
     private function defaultMannyCount(): int
     {
         return max(0, Config::int($this->config, 'probe.initialMannyCount', 4));
@@ -325,34 +370,15 @@ final class MannyRepository
      */
     public function withMannyLock(int $id, callable $callback): mixed
     {
-        $ownsTransaction = !$this->pdo->inTransaction();
-        if ($ownsTransaction) {
-            $this->pdo->beginTransaction();
-        }
-
-        try {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($id, $callback): mixed {
             $sql = $this->taskJoinSql('m.id = :id');
-            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') {
-                $sql .= ' FOR UPDATE';
-            }
+            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $sql .= ' FOR UPDATE'; }
             $stmt = $this->pdo->prepare($sql);
             $stmt->execute(['id' => $id]);
             $row = $stmt->fetch();
-            if (!$row) {
-                throw new \RuntimeException('Manny not found while acquiring task lock.');
-            }
-            $result = $callback($this->hydrate($row));
-            if ($ownsTransaction) {
-                $this->pdo->commit();
-            }
-
-            return $result;
-        } catch (\Throwable $error) {
-            if ($ownsTransaction && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
+            if (!$row) { throw new \RuntimeException('Manny not found while acquiring task lock.'); }
+            return $callback($this->hydrate($row));
+        });
     }
 
     public function nameExistsForProbe(int $probeId, string $name, ?int $exceptId = null): bool
@@ -404,8 +430,11 @@ final class MannyRepository
             }
         }
 
+        $clearForgotten = $manny->isOnProbe() || $manny->probeId === null;
+        if ($clearForgotten) { $manny->isForgotten = false; }
         $stmt = $this->pdo->prepare(
             'UPDATE mannies SET
+                is_forgotten = CASE WHEN :clear_forgotten THEN 0 ELSE is_forgotten END,
                 probe_id = :probe_id,
                 storage_container_id = :storage_container_id,
                 name = :name,
@@ -428,6 +457,7 @@ final class MannyRepository
              WHERE id = :id'
         );
         $stmt->execute([
+            'clear_forgotten' => (int) $clearForgotten,
             'id' => $manny->id,
             'probe_id' => $manny->probeId,
             'storage_container_id' => $manny->storageContainerId,
@@ -451,53 +481,6 @@ final class MannyRepository
         ]);
     }
 
-    public function replaceObjectIdReferences(string $oldObjectId, string $newObjectId): void
-    {
-        if ($oldObjectId === '' || $oldObjectId === $newObjectId) {
-            return;
-        }
-
-        $replace = static function (mixed $value) use (&$replace, $oldObjectId, $newObjectId): mixed {
-            if (is_string($value)) {
-                return $value === $oldObjectId ? $newObjectId : $value;
-            }
-            if (!is_array($value)) {
-                return $value;
-            }
-            foreach ($value as $key => $nested) {
-                $value[$key] = $replace($nested);
-            }
-            return $value;
-        };
-
-        foreach (['scheduled_events' => 'payload_json'] as $table => $column) {
-            $rows = $this->pdo->query("SELECT id, {$column} FROM {$table}")->fetchAll(PDO::FETCH_ASSOC);
-            $update = $this->pdo->prepare("UPDATE {$table} SET {$column} = :payload, updated_at = :updated_at WHERE id = :id");
-            foreach ($rows as $row) {
-                $payload = json_decode((string) ($row[$column] ?? '{}'), true, 512, JSON_THROW_ON_ERROR);
-                $updated = $replace($payload);
-                if ($updated === $payload) {
-                    continue;
-                }
-                $update->execute([
-                    'id' => $row['id'],
-                    'payload' => json_encode($updated, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-                    'updated_at' => gmdate('c'),
-                ]);
-            }
-        }
-
-        $stmt = $this->pdo->prepare(
-            'UPDATE detached_storage_containers
-             SET target_object_id = :new_object_id, updated_at = :updated_at
-             WHERE target_object_id = :old_object_id'
-        );
-        $stmt->execute([
-            'old_object_id' => $oldObjectId,
-            'new_object_id' => $newObjectId,
-            'updated_at' => gmdate('c'),
-        ]);
-    }
 
     private function hydrate(array $row): Manny
     {
@@ -536,6 +519,7 @@ final class MannyRepository
             (float) ($row['cargo_organic_compounds'] ?? 0),
             (string) $row['created_at'],
             (string) $row['updated_at'],
+            (bool) $row['is_forgotten'],
         );
     }
 

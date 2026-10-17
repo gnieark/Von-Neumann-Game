@@ -118,7 +118,7 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $detachedContainers = new DetachedStorageContainerRepository($pdo);
         $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: $detachedContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), pdo: $pdo, detachedContainers: $detachedContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), mannies: new MannyRepository($pdo, $gameplayConfig));
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
         $auth = new AuthService($players, $authMethods, $probes, $sessions, $visitedSectors, $storage, (int) ($appConfig['sessionTtlDays'] ?? 7), $mannies, $apiKeys, $sectorService, gameplayConfig: $gameplayConfig, universeConfig: $universeConfig);
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
@@ -176,7 +176,7 @@ final class AppFactory
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
         $detachedContainers = new DetachedStorageContainerRepository($pdo);
         $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: $detachedContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), pdo: $pdo, detachedContainers: $detachedContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), mannies: new MannyRepository($pdo, $gameplayConfig));
         $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
         $improvements = new ProbeImprovementRepository($pdo);
         $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig, $improvements);
@@ -245,7 +245,7 @@ final class AppFactory
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
         $sectorRepository = new SectorFileRepository($this->absolutePath((string) ($appConfig['universePath'] ?? 'data/universe')));
-        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), detachedContainers: new DetachedStorageContainerRepository($pdo), germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo), effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
+        $sectorService = new SectorService($sectorRepository, new SectorContentGenerator($universeConfig), (string) ($appConfig['worldSeed'] ?? 'default-world'), pdo: $pdo, detachedContainers: new DetachedStorageContainerRepository($pdo), germinationDepots: new \VonNeumannGame\Repository\GerminationDepotRepository($pdo), effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo), mannies: new MannyRepository($pdo, $gameplayConfig));
         $probes = new NeumannProbeRepository($pdo, $gameplayConfig);
         $mannies = new MannyRepository($pdo, $gameplayConfig);
         $storage = new ProbeStorageService(

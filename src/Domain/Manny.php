@@ -63,6 +63,7 @@ final class Manny
         public float $cargoOrganicCompounds,
         public readonly string $createdAt,
         public string $updatedAt,
+        public bool $isForgotten = false,
     ) {}
 
     public function isOnProbe(): bool

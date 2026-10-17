@@ -2,6 +2,39 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-17
+
+### Changed
+
+- Stocks minables SQL, lot 3 : motorisation et références actives, fusion/fragmentation, transit/capture/perte, destruction, sculpture, ravitaillement, renommage et inspection passent par des intentions de secteur publiées après commit. Les transformations utilisent les stocks courants sous verrou et préservent les cargaisons attachées ; les replays ne recréent pas les ressources. Le minage revalide la trajectoire lorsqu'un fichier de départ est en retard. Contrat public inchangé (v148).
+- Stocks minables SQL, lot 2 bis : les Mannies oubliées utilisent `mannies.is_forgotten` et leurs données SQL courantes. Observations et recherches par identifiant composent leur présence sans l'écrire dans les secteurs ; récupération et embarquement revalident l'état et la place sous verrous. Les Mannies abandonnées conservent leur format et leurs règles, avec publication durable après commit. Contrat API inchangé (v148).
+- Statistiques : comptage SQL des Mannies oubliées et extraction des requêtes dans `UniverseStatsRepository`, conformément à la garde d'architecture.
+
+### Added
+
+- Conversion explicite des snapshots de trajectoires actives : `scripts/one-shot-scripts/migrate-asteroid-snapshot-descriptors.php`, simulation par défaut, `--apply --backup=NEW_FILE` puis `--verify`, sous maintenance après import des stocks. Les historiques terminaux restent inchangés. Les lots 4, 4 bis, 5, 6 et 7 restent requis avant déploiement de la migration globale.
+- Conversion explicite `scripts/one-shot-scripts/migrate-forgotten-mannies.php --database-config=PATH --universe-path=PATH`, simulation en lecture seule par défaut ; application sous maintenance avec `--apply --manifest=PATH`. Ajout de colonne, rapprochements, sauvegarde des fichiers dans le manifeste et reprise sans recrédit de cargaison. Les divergences/orphelines exigent une résolution documentée ; les publications oubliées en attente bloquent la conversion. Étape intermédiaire : les lots 4 à 7 (dont 4 bis) restent nécessaires avant déploiement global ; aucune application en production.
+
+## 2026-10-16
+
+### Added
+
+- Migration des stocks minables SQL, premiers lots : inventaire technique dans `docs/mineable-object-stock-migration-inventory.md` et audit administratif en lecture seule `scripts/one-shot-scripts/audit-mineable-object-stock-migration.php`. Chemins base/univers explicites, parcours borné, stocks et références par occurrence, transit, Mannies oubliées et anomalies ; l'option explicite `--missing-resources=zero` recense les ressources absentes des astéroïdes épuisés sans effacer les quantités présentes.
+- Fondations SQL : tables `mineable_object_identities` et `mineable_object_stocks`, registre durable des attributions, lectures groupées, débits sous verrou local, transformations d'identité et import explicite vérifié à la reprise. Migration de schéma seule `scripts/one-shot-scripts/migrate-mineable-object-stock-schema.php`, simulation par défaut. Ces fondations seules ne constituent pas un déploiement de la migration. Aucun changement de contrat API.
+
+
+### Changed
+
+- Stocks minables SQL, lot 2 : séparation des descripteurs JSON et des ressources hydratées depuis SQL pour les astéroïdes et épaves de vaisseau-mère. Génération, astéroïdes de démarrage, épaves Others et outils de création utilisent une attribution durable d'identité et une publication rejouable après commit ; le scheduler reprend les échecs de publication sans recréer de ressources. Stocks planétaires et moissonnage collectif Others inchangés ; contrat API inchangé (v148).
+- Extension explicite de `sector_effects` à `create_sector` : `scripts/one-shot-scripts/migrate-sector-creation-effects-schema.php --database-config=PATH`, simulation par défaut, application sous maintenance avec `--apply`. Raccords SQL du minage individuel et de la motorisation pour accompagner les lectures du lot 2. **Étape intermédiaire non déployable** : les anciens fichiers nécessitent la conversion du lot 6 ; les lots 2 bis à 7 restent nécessaires avant bascule, notamment le cycle de vie et la coordination du minage avec la destruction des sondes. Aucun changement appliqué à la production.
+
+## 2026-10-15
+
+### Fixed
+
+- Script administratif `scripts/one-shot-scripts/recall-chris-failed-detachment.php` : rappel ciblé de `manny-98` de Chris après l'échec de son détachement, via le service de rappel du jeu. Simulation par défaut, sauvegarde obligatoire à l'application et refus si le conteneur détaché existe déjà.
+- Script administratif `scripts/one-shot-scripts/requeue-failed-manny-storage-transactions.php` pour remettre en file les tâches actives de Mannies ayant échoué sur les tentatives de transaction de stockage ou une expiration de verrou SQL. Joueur obligatoire via `--player-id`, simulation par défaut, application via `--apply --backup=NEW_FILE`, sauvegarde et verrouillage transactionnel. Les charges utiles et le compteur de tentatives sont conservés ; les reprises sont espacées d'une seconde. Aucun changement du contrat API.
+
 ## 2026-10-13
 
 ### Fixed

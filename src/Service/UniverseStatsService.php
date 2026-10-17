@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service;
 
-use PDO;
+use VonNeumannGame\Repository\UniverseStatsRepository;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use VonNeumannGame\Domain\Mission;
@@ -22,7 +22,7 @@ final class UniverseStatsService
     private const PUBLIC_RANKING_LIMIT = 9;
 
     public function __construct(
-        private readonly PDO $pdo,
+        private readonly UniverseStatsRepository $statistics,
         private readonly string $universePath,
     ) {}
 
@@ -34,6 +34,7 @@ final class UniverseStatsService
         $probeRows = $this->probeRows();
         $visitedSectorKeys = $this->visitedSectorKeys();
         $sectorStats = $this->sectorStats($visitedSectorKeys);
+        $sectorStats['forgottenMannies'] = $this->statistics->forgottenMannyCount();
         $detachedContainerStats = $this->detachedContainerStats();
         $probeDistances = $this->probeDistances($probeRows);
         $waypointStats = $this->waypointStats();
@@ -87,20 +88,7 @@ final class UniverseStatsService
      */
     private function othersDestructionStats(): array
     {
-        $stmt = $this->pdo->query(
-            'SELECT players.id AS player_id, players.username, players.display_name,
-                    players.others_ships_destroyed, players.others_motherships_destroyed
-             FROM players
-             WHERE (players.others_ships_destroyed > 0 OR players.others_motherships_destroyed > 0)
-               AND EXISTS (
-                   SELECT 1
-                   FROM neumann_probes
-                   WHERE neumann_probes.player_id = players.id
-                     AND neumann_probes.exclude_from_stats = 0
-               )
-             ORDER BY players.id ASC'
-        );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->destroyedShipsByPlayer();
         $hunters = [];
         $eradicators = [];
         foreach ($rows as $row) {
@@ -180,24 +168,9 @@ final class UniverseStatsService
             'successful' => 0,
             'failed' => 0,
         ];
-        $stmt = $this->pdo->prepare(
-            'SELECT probe_missions.status, COUNT(*) AS mission_count
-             FROM probe_missions
-             WHERE probe_missions.status IN (:completed_status, :failed_status)
-               AND EXISTS (
-                   SELECT 1
-                   FROM neumann_probes
-                   WHERE neumann_probes.player_id = probe_missions.player_id
-                     AND neumann_probes.exclude_from_stats = 0
-               )
-             GROUP BY probe_missions.status'
-        );
-        $stmt->execute([
-            'completed_status' => Mission::STATUS_COMPLETED,
-            'failed_status' => Mission::STATUS_FAILED,
-        ]);
+        $stmtRows = $this->statistics->missionStatusCounts();
 
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        foreach ($stmtRows as $row) {
             if (($row['status'] ?? null) === Mission::STATUS_COMPLETED) {
                 $stats['successful'] = max(0, (int) $row['mission_count']);
             } elseif (($row['status'] ?? null) === Mission::STATUS_FAILED) {
@@ -213,8 +186,7 @@ final class UniverseStatsService
      */
     private function probeRows(): array
     {
-        $stmt = $this->pdo->query('SELECT player_id, sector_x, sector_y, sector_z FROM neumann_probes WHERE exclude_from_stats = 0 ORDER BY id ASC');
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->probePositions();
 
         return array_map(static fn(array $row): array => [
             'playerId' => (int) $row['player_id'],
@@ -229,14 +201,7 @@ final class UniverseStatsService
      */
     private function visitedSectorKeys(): array
     {
-        $stmt = $this->pdo->query(
-            'SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z
-             FROM visited_sectors
-             INNER JOIN neumann_probes ON neumann_probes.player_id = visited_sectors.player_id
-             WHERE neumann_probes.exclude_from_stats = 0
-             GROUP BY visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z'
-        );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->visitedSectorCoordinates();
 
         $keys = [];
         foreach ($rows as $row) {
@@ -248,15 +213,9 @@ final class UniverseStatsService
 
     private function othersOccupiedSectors(): int
     {
-        $stmt = $this->pdo->query(
-            "SELECT COUNT(*) FROM (
-                SELECT DISTINCT sector_x, sector_y, sector_z
-                FROM others_ships
-                WHERE destroyed_at IS NULL AND status NOT IN ('removed', 'transit')
-            ) occupied_sectors"
-        );
+        $stmtRows = $this->statistics->othersOccupiedSectorCount();
 
-        return (int) $stmt->fetchColumn();
+        return (int) $stmtRows;
     }
 
     /**
@@ -264,26 +223,7 @@ final class UniverseStatsService
      */
     private function topVisitedPlayers(): array
     {
-        $stmt = $this->pdo->query(
-            'SELECT players.id AS player_id, players.username, players.display_name,
-                    COALESCE(NULLIF(players.display_name, \'\'), players.username, \'\') AS player_name,
-                    COUNT(visited_sectors.player_id) AS visited_count
-             FROM players
-             LEFT JOIN (
-                 SELECT DISTINCT player_id, sector_x, sector_y, sector_z
-                 FROM visited_sectors
-             ) visited_sectors ON visited_sectors.player_id = players.id
-             WHERE EXISTS (
-                 SELECT 1
-                 FROM neumann_probes
-                 WHERE neumann_probes.player_id = players.id
-                   AND neumann_probes.exclude_from_stats = 0
-             )
-             GROUP BY players.id, players.username, players.display_name
-             ORDER BY visited_count DESC, player_name ASC, players.id ASC
-             LIMIT ' . self::PUBLIC_RANKING_LIMIT
-        );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->topVisitedPlayers();
 
         return array_map(static function (array $row, int $index): array {
             $displayName = trim((string) ($row['display_name'] ?? ''));
@@ -303,19 +243,7 @@ final class UniverseStatsService
      */
     private function topFurthestPlayersFromHome(): array
     {
-        $stmt = $this->pdo->prepare(
-            'SELECT players.id AS player_id, players.username, players.display_name,
-                    players.home_sector_x, players.home_sector_y, players.home_sector_z,
-                    neumann_probes.id AS probe_id, neumann_probes.name AS probe_name,
-                    neumann_probes.sector_x, neumann_probes.sector_y, neumann_probes.sector_z
-             FROM players
-             INNER JOIN neumann_probes ON neumann_probes.player_id = players.id
-             WHERE neumann_probes.exclude_from_stats = 0
-               AND neumann_probes.status <> :dead_status
-             ORDER BY players.id ASC, neumann_probes.id ASC'
-        );
-        $stmt->execute(['dead_status' => ProbeStatus::Dead->value]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->livingProbePositions();
         $grid = new SectorGrid();
         $furthestByPlayer = [];
         foreach ($rows as $row) {
@@ -476,8 +404,7 @@ final class UniverseStatsService
     {
         $coveredSectors = [];
         $coverageRowsByNetwork = $this->scutCoverageRowsByNetwork();
-        $networkStmt = $this->pdo->query('SELECT id, name FROM scut_networks ORDER BY id ASC');
-        $networkRows = $networkStmt === false ? [] : $networkStmt->fetchAll(PDO::FETCH_ASSOC);
+        $networkRows = $this->statistics->scutNetworks();
         $topNetworks = [];
         foreach ($networkRows as $row) {
             $networkId = (int) ($row['id'] ?? 0);
@@ -492,20 +419,7 @@ final class UniverseStatsService
             ];
         }
 
-        $relayStmt = $this->pdo->query(
-            "SELECT scut_relays.id, scut_relays.created_by_probe_id,
-                    neumann_probes.id AS probe_id,
-                    neumann_probes.player_id,
-                    neumann_probes.exclude_from_stats AS probe_excluded,
-                    players.username,
-                    players.display_name
-             FROM scut_relays
-             LEFT JOIN neumann_probes ON neumann_probes.id = scut_relays.created_by_probe_id
-             LEFT JOIN players ON players.id = neumann_probes.player_id
-             WHERE scut_relays.status = '" . ScutRelay::STATUS_ON . "'
-             ORDER BY scut_relays.id ASC"
-        );
-        $relayRows = $relayStmt === false ? [] : $relayStmt->fetchAll(PDO::FETCH_ASSOC);
+        $relayRows = $this->statistics->activeScutRelays();
 
         $activators = [];
         foreach ($relayRows as $row) {
@@ -557,14 +471,7 @@ final class UniverseStatsService
      */
     private function scutCoverageRowsByNetwork(): array
     {
-        $stmt = $this->pdo->query(
-            'SELECT scut_network_id, sector_x, sector_y, sector_z
-             FROM scut_covered_sectors
-             WHERE scut_network_id IS NOT NULL
-             GROUP BY scut_network_id, sector_x, sector_y, sector_z
-             ORDER BY scut_network_id ASC, sector_x ASC, sector_y ASC, sector_z ASC'
-        );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->scutCoverage();
 
         $coverage = [];
         foreach ($rows as $row) {
@@ -624,15 +531,7 @@ final class UniverseStatsService
     private function firstDiscoverersBySector(): array
     {
         $excludedPlayerIds = $this->excludedStatsPlayerIds();
-        $stmt = $this->pdo->query(
-            "SELECT visited_sectors.sector_x, visited_sectors.sector_y, visited_sectors.sector_z,
-                    visited_sectors.player_id, players.username, players.display_name
-             FROM visited_sectors
-             INNER JOIN players ON players.id = visited_sectors.player_id
-             ORDER BY visited_sectors.sector_x ASC, visited_sectors.sector_y ASC, visited_sectors.sector_z ASC,
-                      visited_sectors.first_visited_at ASC, visited_sectors.id ASC"
-        );
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $this->statistics->visitsInDiscoveryOrder();
 
         $discoverers = [];
         foreach ($rows as $row) {
@@ -662,8 +561,7 @@ final class UniverseStatsService
      */
     private function excludedStatsPlayerIds(): array
     {
-        $stmt = $this->pdo->query('SELECT player_id FROM neumann_probes WHERE exclude_from_stats = 1');
-        $rows = $stmt === false ? [] : $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $rows = $this->statistics->excludedPlayerIds();
         $excluded = [];
         foreach ($rows as $playerId) {
             $excluded[(int) $playerId] = true;
@@ -763,14 +661,9 @@ final class UniverseStatsService
      */
     private function detachedContainerStats(): array
     {
-        $stmt = $this->pdo->query(
-            "SELECT mode, COUNT(*) AS container_count
-             FROM detached_storage_containers
-             WHERE mode IN ('drifting', 'hidden_on_asteroid', 'hidden_on_dormant_construct')
-             GROUP BY mode"
-        );
+        $stmtRows = $this->statistics->detachedContainerCounts();
         $stats = ['drifting' => 0, 'hidden' => 0];
-        foreach ($stmt !== false ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [] as $row) {
+        foreach ($stmtRows as $row) {
             if (($row['mode'] ?? null) === 'drifting') {
                 $stats['drifting'] = (int) $row['container_count'];
             } elseif (SectorDetachedContainer::isHiddenMode((string) ($row['mode'] ?? ''))) {
@@ -824,9 +717,7 @@ final class UniverseStatsService
                 }
             } elseif ($type === 'manny') {
                 $state = (string) ($object['state'] ?? '');
-                if ($state === 'forgotten') {
-                    $stats['forgottenMannies']++;
-                } elseif ($state === 'abandoned') {
+                if ($state === 'abandoned') {
                     $stats['lostMannies']++;
                 }
             } elseif ($type === 'solar_system') {

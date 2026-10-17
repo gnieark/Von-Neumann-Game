@@ -69,7 +69,7 @@ try {
     $missions = new MissionRepository($pdo);
     $damageWarnings = new ProbeDamageWarningRepository($pdo);
     $improvements = new ProbeImprovementRepository($pdo);
-    $sectorService = buildSectorService($factory, $root);
+    $sectorService = buildSectorService($factory, $root, $pdo);
     $durations = new MovementDurationCalculator(Config::getArray($gameplayConfig, 'movement'));
     $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, $gameplayConfig);
     $missionService = new MissionService(
@@ -307,7 +307,7 @@ function destinationCoordinates(string $mode, array $coordinates, SectorCoordina
     return new SectorCoordinates($coordinates['x'], $coordinates['y'], $coordinates['z']);
 }
 
-function buildSectorService(AppFactory $factory, string $root): SectorService
+function buildSectorService(AppFactory $factory, string $root, PDO $pdo): SectorService
 {
     $appConfig = $factory->appConfig();
     $universePath = resolveProjectPath($root, (string) ($appConfig['universePath'] ?? 'data/universe'));
@@ -316,6 +316,7 @@ function buildSectorService(AppFactory $factory, string $root): SectorService
         new SectorFileRepository($universePath),
         new SectorContentGenerator($factory->universeConfig()),
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
+        pdo: $pdo,
     );
 }
 

@@ -32,6 +32,11 @@ try {
     $sector = $existed
         ? $repository->load($coordinates)
         : $generator->generate($coordinates, $worldSeed, []);
+    $sectors = null;
+    if (!$options['dryRun']) {
+        $sectors = new \VonNeumannGame\Sector\SectorService($repository, $generator, $worldSeed, $factory->pdo($options['databaseConfig']));
+        $sector = $sectors->getOrCreateSector($coordinates);
+    }
     $planetId = $options['id'] ?? forceInhabitedPlanetDefaultId($coordinates, $worldSeed);
     $planetName = array_key_exists('name', $options) ? $options['name'] : null;
     $removedLegacyDebugPlanets = forceInhabitedPlanetRemoveOtherDebugPlanets($sector, $planetId);
@@ -53,7 +58,7 @@ try {
     }
 
     if (!$options['dryRun']) {
-        $repository->save($sector);
+        $sectors->saveSector($sector);
     }
 
     $path = $repository->getPath($coordinates);
@@ -95,6 +100,7 @@ try {
 function forceInhabitedPlanetParseArguments(array $argv): array
 {
     $options = [
+        'databaseConfig' => null,
         'x' => 0,
         'y' => 0,
         'z' => 0,
@@ -111,6 +117,10 @@ function forceInhabitedPlanetParseArguments(array $argv): array
     $coordinates = [];
 
     foreach (array_slice($argv, 1) as $argument) {
+        if (str_starts_with($argument, '--database-config=')) {
+            $options['databaseConfig'] = substr($argument, strlen('--database-config='));
+            continue;
+        }
         if ($argument === '--help' || $argument === '-h') {
             $options['help'] = true;
             continue;
@@ -188,6 +198,7 @@ Usage:
   php scripts/force-inhabited-planet.php --sector=<x,y,z> --name="Pale Signal"
 
 Options:
+  --database-config=<path>  Use the SQL database matching the universe.
   --id=<id>                Planet id. Default is opaque and stable for the sector.
   --name=<name>            Planet name. Default is null.
   --category=<category>    Planet category (default: ocean).

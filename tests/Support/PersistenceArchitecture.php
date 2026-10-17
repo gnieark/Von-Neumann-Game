@@ -58,8 +58,6 @@ final class PersistenceArchitecture
         // Closed, role-specific debt. No directory is exempted.
         $migrations = ['src/Service/SectorStorageMigration.php', 'src/Service/DetachedContainerJsonMigrationService.php'];
         $frozenDebt = [
-            'src/Service/UniverseStatsService.php' => '6a3ba5fbcd137ada39360be95355e9ed2113ef16037aa8de530cb9a02590d2a0',
-            'src/Service/AsteroidTrajectory/AsteroidTrajectoryService.php' => '22efb62edfdc35a8e356f2c8fd0a8e6d6dbef51571c007fdcd35d24f232fa40c',
         ];
         $errors = [];
         foreach (['src/Service', 'src/Http', 'src/Repository'] as $directory) {

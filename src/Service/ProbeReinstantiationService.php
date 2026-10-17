@@ -371,8 +371,8 @@ final class ProbeReinstantiationService
 
         $sector = $this->sectors->getOrCreateSector($coordinates);
         if (!$existedBefore && $sector->getObjects() === [] && Config::bool($this->gameplayConfig, 'player.starterAsteroid.enabledForNewEmptySectors', true)) {
-            $sector->addObject($this->starterIronAsteroid($coordinates));
-            $this->sectors->saveSector($sector);
+            $this->sectors->createMineable($coordinates, 'starter-asteroid-' . hash('sha256', $coordinates->toKey()), $this->starterIronAsteroid($coordinates));
+            $sector = $this->sectors->getOrCreateSector($coordinates);
         }
 
         return $sector;

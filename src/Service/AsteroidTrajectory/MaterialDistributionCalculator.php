@@ -26,7 +26,11 @@ final class MaterialDistributionCalculator
         }
 
         $scale = 10 ** $precision;
-        $totalUnits = (int) round(max(0.0, $recoverableTotal) * $scale);
+        $scaled = round($recoverableTotal * $scale);
+        if (!is_finite($recoverableTotal) || $recoverableTotal < 0 || !is_finite($scaled) || $scaled >= min((float) PHP_INT_MAX, 9007199254740992.0)) {
+            throw new \OverflowException('Fragment distribution exceeds its numeric resolution.');
+        }
+        $totalUnits = (int) $scaled;
         $weights = [];
         $weightTotal = 0.0;
         for ($index = 0; $index < $partCount; $index++) {
@@ -43,6 +47,10 @@ final class MaterialDistributionCalculator
             $fractions[$index] = $exact - $units[$index];
             $assigned += $units[$index];
         }
+        if ($assigned > $totalUnits || $totalUnits - $assigned > $partCount) {
+            throw new \OverflowException('Fragment rounding residue cannot be assigned without losing precision.');
+        }
+        // Stable sort keeps creation-slot order for equal fractional remainders.
         arsort($fractions, SORT_NUMERIC);
         foreach (array_keys($fractions) as $index) {
             if ($assigned >= $totalUnits) {

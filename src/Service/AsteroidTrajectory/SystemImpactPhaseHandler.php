@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service\AsteroidTrajectory;
 
 use VonNeumannGame\Domain\AsteroidTrajectory;
+use VonNeumannGame\Domain\MineableResourceAmounts;
 use VonNeumannGame\Domain\NeumannProbe;
 use VonNeumannGame\Domain\ProbeDamageWarning;
 use VonNeumannGame\Domain\ProbeStatus;
@@ -49,7 +50,15 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
 
     public function handle(AsteroidTrajectory $trajectory, \DateTimeImmutable $now): AsteroidTrajectory
     {
-        $sector = $this->sectors->getOrCreateSector($trajectory->currentSector);
+        return $this->sectors->changeMineablesAfterCommit(
+            $trajectory->currentSector,
+            array_values(array_filter([$trajectory->asteroidId, $trajectory->targetObjectId])),
+            fn(SectorContent $sector): AsteroidTrajectory => $this->resolve($trajectory, $now, $sector),
+        );
+    }
+
+    private function resolve(AsteroidTrajectory $trajectory, \DateTimeImmutable $now, SectorContent $sector): AsteroidTrajectory
+    {
         $source = $sector->findObjectById($trajectory->asteroidId);
         if (!$source instanceof Asteroid) {
             return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'source_missing', 'source_missing', 'unknown', null, [], $now);
@@ -63,14 +72,12 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             && [(int)$targetOthers['sector_x'],(int)$targetOthers['sector_y'],(int)$targetOthers['sector_z']] === [$trajectory->currentSector->getX(),$trajectory->currentSector->getY(),$trajectory->currentSector->getZ()];
         if (($target === null && !$othersPresent) || ($targetProbe !== null && !$targetProbe->currentSector->equals($trajectory->currentSector))) {
             $this->destroyObject($sector, $source->getId());
-            $this->sectors->saveSector($sector);
             $missingKind = $targetProbe !== null ? 'probe' : ($targetOthers !== null ? 'others_ship' : 'unknown');
             $missingTarget = $targetProbe ?? $targetOthers;
             return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'target_missing', 'target_missing', $missingKind, $missingTarget, [], $now);
         }
         if ($othersPresent) {
             $this->destroyObject($sector, $source->getId());
-            $this->sectors->saveSector($sector);
             $relativistic = (float)$trajectory->targetSpeedC >= 0.05;
             $responsiblePlayerId = $trajectory->launcherProbeId !== null
                 ? $this->probes->findById($trajectory->launcherProbeId)?->playerId
@@ -100,6 +107,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             );
         }
         if ($target instanceof \VonNeumannGame\Sector\SectorGerminationDepot) {
+            $this->sectors->mineableStocks()->delete($source->getId());
             ($this->othersService ?? throw new \RuntimeException('Depot impact service required.'))->depotService()->impactWithSourceEffect(
                 $target->getId(), 'depot-impact-' . $trajectory->uid, $trajectory->currentSector, $source->getId(), $now->format('c'),
             );
@@ -112,7 +120,6 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
             && $now < new \DateTimeImmutable($targetMovement->arrivalAt)
         ) {
             $this->destroyObject($sector, $source->getId());
-            $this->sectors->saveSector($sector);
             return $this->finish($trajectory, AsteroidTrajectory::STATUS_MISSED, 'moving_probe', 'moving_probe', 'probe', $targetProbe, [], $now);
         }
 
@@ -120,7 +127,6 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         $resolution = $this->damage->resolve($source, $target, (float) $trajectory->targetSpeedC, $random);
         if ($target instanceof Star) {
             $this->destroyObject($sector, $source->getId());
-            $this->sectors->saveSector($sector);
             return $this->finish($trajectory, AsteroidTrajectory::STATUS_NO_EFFECT, 'star_unchanged', 'star_unchanged', 'star', null, $resolution, $now);
         }
         if ($targetProbe !== null) {
@@ -131,7 +137,6 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
                 $this->destroyObject($sector, $source->getId());
             }
             $this->probes->save($targetProbe);
-            $this->sectors->saveSector($sector);
             return $this->finish(
                 $trajectory,
                 $targetProbe->status === ProbeStatus::Dead ? AsteroidTrajectory::STATUS_DESTROYED : AsteroidTrajectory::STATUS_COMPLETED,
@@ -150,7 +155,6 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         } elseif ($target instanceof Planet) {
             $this->resolvePlanet($sector, $source, $target, $resolution, $trajectory->uid, $random);
         }
-        $this->sectors->saveSector($sector);
 
         return $this->finish(
             $trajectory,
@@ -167,11 +171,11 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
     private function mergeAsteroids(SectorContent $sector, Asteroid $source, Asteroid $target, string $seed): void
     {
         $sourceData = $source->toArray();
-        $resources = [];
-        foreach (array_unique([...array_keys($source->getResourceAmounts()), ...array_keys($target->getResourceAmounts())]) as $type) {
-            $resources[$type] = round(($source->getResourceAmounts()[$type] ?? 0.0) + ($target->getResourceAmounts()[$type] ?? 0.0), 4);
-        }
-        $mergedId = 'ast_merge_' . substr(hash('sha256', $seed), 0, 20);
+        $resources = MineableResourceAmounts::add($source->getResourceAmounts(), $target->getResourceAmounts());
+        $mergedId = $this->sectors->mineableStocks()->merge(
+            'impact-merge-' . $seed, [$source->getId(), $target->getId()],
+            'ast_merge_' . substr(hash('sha256', $seed), 0, 20),
+        );
         $merged = new Asteroid(
             $mergedId,
             Asteroid::generatedName($resources, $seed),
@@ -197,12 +201,7 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         $count = (int) $resolution['fragmentCount'];
         $recoverableMass = ($source->getMass() + $target->getMass()) * (1.0 - (float) $resolution['unrecoverableMassFraction']);
         $masses = $this->distribution->distribute($recoverableMass, $count, $random, 8);
-        $resourceTotals = [];
-        foreach ([$source->getResourceAmounts(), $target->getResourceAmounts()] as $amounts) {
-            foreach ($amounts as $type => $amount) {
-                $resourceTotals[$type] = round(($resourceTotals[$type] ?? 0.0) + $amount, 4);
-            }
-        }
+        $resourceTotals = MineableResourceAmounts::add($source->getResourceAmounts(), $target->getResourceAmounts());
         $resourceSplits = [];
         foreach ($resourceTotals as $type => $total) {
             $resourceSplits[$type] = $this->distribution->distribute($total * (1.0 - (float) $resolution['unrecoverableMassFraction']), $count, $random);
@@ -211,13 +210,16 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         $sector->removeObjectById($target->getId());
         $sector->removeContainersForObject($source->getId());
         $sector->removeContainersForObject($target->getId());
+        $this->sectors->mineableStocks()->delete($source->getId());
+        $this->sectors->mineableStocks()->delete($target->getId());
         for ($index = 0; $index < $count; $index++) {
             $resources = [];
             foreach ($resourceSplits as $type => $amounts) {
                 $resources[$type] = $amounts[$index];
             }
             $sector->addObject(new Asteroid(
-                'ast_frag_' . substr(hash('sha256', $seed . ':' . $index), 0, 20), null, 'impact_fragment',
+                $this->sectors->mineableStocks()->create('impact-fragment-' . $seed . ':' . $index,
+                    'ast_frag_' . substr(hash('sha256', $seed . ':' . $index), 0, 20), $resources), null, 'impact_fragment',
                 array_keys(array_filter($resources, static fn(float $amount): bool => $amount > 0.0)), 'fragment',
                 $masses[$index], max(0.000001, (($source->getRadius() ** 3 + $target->getRadius() ** 3) * ($masses[$index] / max(1.0e-12, $source->getMass() + $target->getMass()))) ** (1 / 3)),
                 'Recoverable impact fragment.', $resources,
@@ -248,17 +250,20 @@ final class SystemImpactPhaseHandler implements PhaseHandlerInterface
         $masses = $this->distribution->distribute(max(0.0, $recoverable - $residualMass), $count, $random, 8);
         $hints = is_array($target->toArray()['resourceHints'] ?? null) ? $target->toArray()['resourceHints'] : [];
         foreach ($masses as $index => $mass) {
-            $sector->addObject(new Asteroid(
+            $fragment = new Asteroid(
                 'ast_frag_' . substr(hash('sha256', $seed . ':planet:' . $index), 0, 20), null, 'planet_fragment',
                 $hints, 'fragment', $mass,
                 max(0.000001, $target->getRadius() * (($mass / max(1.0e-12, $target->getMass())) ** (1 / 3))),
                 'Fragment of a disrupted planet.',
-            ));
+            );
+            $id = $this->sectors->mineableStocks()->create('impact-planet-fragment-' . $seed . ':' . $index, $fragment->getId(), $fragment->getResourceAmounts());
+            $sector->addObject($fragment->withId($id));
         }
     }
 
     private function destroyObject(SectorContent $sector, string $objectId): void
     {
+        $this->sectors->mineableStocks()->delete($objectId);
         $sector->removeObjectById($objectId);
         $sector->removeContainersForObject($objectId);
     }

@@ -54,6 +54,19 @@ $db = $connect();
 $projectiles = $db->query('SELECT * FROM others_projectiles WHERE action_id IN (SELECT id FROM others_actions WHERE ship_id=' . (int) $carrier['id'] . ')')->fetchAll(PDO::FETCH_ASSOC);
 $assert(count($projectiles) === 1, 'Others: one projectile and no duplicate ammunition');
 $projectile = $projectiles[0];
+// This race tests one successful impact, not the unrelated 5% miss probability.
+// Choose a deterministic successful fixture, as in OthersDestructionTests.
+$impactTime = new DateTimeImmutable($projectile['impact_at']);
+for ($offset = 0; $offset < 100; ++$offset) {
+    $candidate = $impactTime->modify('+' . $offset . ' seconds')->format('c');
+    $roll = hexdec(substr(hash('sha256', $projectile['public_id'] . '|' . $escort['public_id'] . '|' . $candidate . '|hit'), 0, 8)) / 4294967296;
+    if ($roll < 0.95) {
+        $db->prepare('UPDATE others_projectiles SET impact_at=? WHERE id=?')->execute([$candidate, $projectile['id']]);
+        $projectile['impact_at'] = $candidate;
+        break;
+    }
+}
+$assert($roll < 0.95, 'Others: successful-impact fixture is deterministic');
 $projectile['scheduled_event_id'] = (int) $db->query("SELECT id FROM scheduled_events WHERE entity_type='missile_projectile' AND entity_id=" . (int) $projectile['id'] . ' ORDER BY id DESC LIMIT 1')->fetchColumn();
 $db = null;
 $impact = static function (PDO $db) use ($directory, $projectile): bool {

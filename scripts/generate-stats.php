@@ -18,7 +18,7 @@ foreach (array_slice($argv, 1) as $argument) {
 $factory = new AppFactory($projectRoot);
 $appConfig = $factory->appConfig();
 $universePath = absolutePath($projectRoot, (string) ($appConfig['universePath'] ?? 'data/universe'));
-$stats = (new UniverseStatsService($factory->pdo(initializeSchema: true), $universePath))->collect();
+$stats = (new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($factory->pdo(initializeSchema: true)), $universePath))->collect();
 
 $directory = dirname($outputPath);
 if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {

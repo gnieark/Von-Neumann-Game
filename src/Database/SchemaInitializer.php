@@ -107,6 +107,7 @@ final class SchemaInitializer
                 storage_container_id INTEGER NULL,
                 name $text NOT NULL,
                 location_type $text NOT NULL,
+                is_forgotten $boolean,
                 sector_x INTEGER NULL,
                 sector_y INTEGER NULL,
                 sector_z INTEGER NULL,
@@ -1050,9 +1051,36 @@ final class SchemaInitializer
                 FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
             )",
         ];
+        array_push($statements, ...$this->mineableObjectStockStatements());
         return $this->driver === 'mysql'
             ? array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements)
             : $statements;
+    }
+
+    /** Also used by the explicit schema migration; never imports or repairs existing data. */
+    public function mineableObjectStockStatements(): array
+    {
+        $identity = $this->driver === 'mysql' ? 'VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin' : 'TEXT COLLATE BINARY';
+        $key = $this->driver === 'mysql' ? 'CHAR(64) CHARACTER SET ascii COLLATE ascii_bin' : 'TEXT COLLATE BINARY';
+        $number = $this->driver === 'mysql' ? 'DOUBLE' : 'REAL';
+        $version = $this->driver === 'mysql' ? 'BIGINT' : 'INTEGER';
+        $statements = [
+            "CREATE TABLE IF NOT EXISTS mineable_object_identities (
+                object_id $identity NOT NULL PRIMARY KEY,
+                creation_key $key NULL UNIQUE,
+                CHECK(length(object_id) BETWEEN 1 AND 255)
+            )",
+            "CREATE TABLE IF NOT EXISTS mineable_object_stocks (
+                object_id $identity NOT NULL PRIMARY KEY,
+                deuterium $number NOT NULL CHECK(deuterium >= 0),
+                metals $number NOT NULL CHECK(metals >= 0),
+                ice $number NOT NULL CHECK(ice >= 0),
+                carbon_compounds $number NOT NULL CHECK(carbon_compounds >= 0),
+                version $version NOT NULL DEFAULT 1 CHECK(version >= 1),
+                FOREIGN KEY(object_id) REFERENCES mineable_object_identities(object_id)
+            )",
+        ];
+        return $this->driver === 'mysql' ? array_map($this->withMysqlEngine(...), $statements) : $statements;
     }
 
     /** Additive canonical columns for the explicit upgrade of existing inventories. */
@@ -1161,7 +1189,7 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS sector_effects (
                 id $id, operation_id $text NOT NULL UNIQUE,
                 sector_x INTEGER NOT NULL, sector_y INTEGER NOT NULL, sector_z INTEGER NOT NULL,
-                effect_type $text NOT NULL CHECK(effect_type IN ('add_object','consume_object','patch_objects')),
+                effect_type $text NOT NULL CHECK(effect_type IN ('add_object','consume_object','patch_objects','create_sector')),
                 object_id $text NOT NULL, payload_json TEXT NOT NULL,
                 status $text NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
                 last_error TEXT NULL, created_at $text NOT NULL, updated_at $text NOT NULL

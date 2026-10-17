@@ -583,8 +583,8 @@ $test->assert(!str_contains(basename($negativePath), '-'), 'negative coordinate 
 $roundTripSector = $contentGenerator->generate($negativeCoordinates, 'round_trip_seed');
 $repository->save($roundTripSector);
 $loadedRoundTrip = $repository->load($negativeCoordinates);
-$expectedLoadedRoundTrip = SectorContent::fromArray($roundTripSector->toArray(), 'loaded');
-$test->assertEquals($expectedLoadedRoundTrip->toArray(), $loadedRoundTrip->toArray(), 'JSON write then read restores the same sector data');
+$expectedLoadedRoundTrip = SectorContent::fromDescriptor($roundTripSector->toDescriptor(), 'loaded');
+$test->assertEquals($expectedLoadedRoundTrip->toArray(), $loadedRoundTrip->toArray(), 'JSON write then read restores descriptors without mineable stocks');
 
 $constructRoundTripCoordinates = new SectorCoordinates(-4, 0, 0);
 $constructRoundTripSector = new SectorContent($constructRoundTripCoordinates, [
@@ -595,12 +595,12 @@ $loadedConstructRoundTrip = $repository->load($constructRoundTripCoordinates);
 $test->assert($loadedConstructRoundTrip->findObjectById('roundtrip-dormant-construct') instanceof DormantConstruct, 'sector storage preserves dormant construct objects');
 
 $mannySector = new SectorContent($coord000, [
-    new SectorManny(SectorManny::objectIdForUid('mny_test'), 'manny-test', 'mny_test', SectorManny::STATE_FORGOTTEN),
+    new SectorManny(SectorManny::objectIdForUid('mny_test'), 'manny-test', 'mny_test', SectorManny::STATE_ABANDONED),
 ]);
 $repository->save($mannySector);
 $loadedMannySector = $repository->load($coord000);
 $expectedLoadedMannySector = SectorContent::fromArray($mannySector->toArray(), 'loaded');
-$test->assertEquals($expectedLoadedMannySector->toArray(), $loadedMannySector->toArray(), 'sector storage preserves abandoned or forgotten Manny objects');
+$test->assertEquals($expectedLoadedMannySector->toArray(), $loadedMannySector->toArray(), 'sector storage preserves abandoned Manny objects');
 
 $legacyDetachedCoordinates = new SectorCoordinates(-6, 0, 0);
 $legacyDetachedSector = new SectorContent($legacyDetachedCoordinates, [
@@ -730,7 +730,9 @@ $test->assertEquals(1, $incompleteReport['summary']['source_container_uid_collis
 
 $serviceBase = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vng_sector_service_tests_' . bin2hex(random_bytes(4));
 $serviceRepository = new SectorFileRepository($serviceBase);
-$service = new SectorService($serviceRepository, $contentGenerator, 'service_seed', $grid);
+$sectorServicePdo = new \PDO('sqlite::memory:');
+(new \VonNeumannGame\Database\SchemaInitializer('sqlite'))->initialize($sectorServicePdo);
+$service = new SectorService($serviceRepository, $contentGenerator, 'service_seed', $sectorServicePdo, $grid);
 $createdOrigin = $service->getOrCreateSector($coord000);
 $test->assert($serviceRepository->exists($coord000), 'a missing sector is generated then saved');
 $creationLog = $service->getCreatedSectorKeys();
@@ -951,5 +953,10 @@ removeDirectory($engineMigrationBase);
 
 // Print summary
 require __DIR__ . '/Support/TransferLoadPlannerTests.php';
+require __DIR__ . '/Support/MineableObjectStockAuditTests.php';
+require __DIR__ . '/Support/MineableObjectStockRepositoryTests.php';
+require __DIR__ . '/Support/MineableSectorPublicationTests.php';
+require __DIR__ . '/Support/ForgottenMannyTests.php';
+require __DIR__ . '/Support/MineableLifecycleTests.php';
 $test->printSummary();
 exit($test->getStatus());

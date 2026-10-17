@@ -92,6 +92,7 @@ final class ProbeReinstantiationRepository
         $this->execute(
             'UPDATE mannies
              SET probe_id = NULL,
+                 is_forgotten = 0,
                  storage_container_id = NULL,
                  location_type = :location_type,
                  current_task = NULL,

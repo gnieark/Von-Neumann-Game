@@ -26,7 +26,7 @@ final class RefuelMotorizedAsteroidTaskHandler implements TaskHandlerInterface
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
         private readonly \Closure $saveManny,
-        private readonly \Closure $saveSector,
+        private readonly \Closure $changeMineables,
         private readonly \Closure $clearTask,
         private readonly \Closure $registerMannyInSector,
         private readonly \Closure $findMannyById,
@@ -92,42 +92,42 @@ final class RefuelMotorizedAsteroidTaskHandler implements TaskHandlerInterface
             return $manny;
         }
 
-        $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
         $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
-        $target = $sector->findObjectById($objectId);
-        $result = ['lastTask' => Manny::TASK_REFUELING_MOTORIZED_ASTEROID, 'objectId' => $objectId];
-        $refueled = false;
-        if (!$target instanceof Asteroid) {
-            $result += ['result' => 'failed', 'failureReason' => 'asteroid_not_found'];
-        } elseif (!$target->isMotorized()) {
-            $result += ['result' => 'failed', 'failureReason' => 'asteroid_not_motorized'];
-        } elseif ($target->getMotorFuelStatus() === Asteroid::MOTOR_FUEL_FULL) {
-            $result += ['result' => 'already_completed', 'asteroid' => $target->toArray()];
-            $refueled = true;
-        } elseif (($this->hasActiveTrajectory)($objectId)) {
-            $result += ['result' => 'failed', 'failureReason' => 'asteroid_trajectory_already_active'];
-        } else {
-            $target = $target->withMotorFuelStatus(Asteroid::MOTOR_FUEL_FULL);
-            $sector->replaceObject($target);
-            ($this->saveSector)($sector);
-            $result += ['result' => 'success', 'asteroid' => $target->toArray()];
-            $refueled = true;
-        }
+        return ($this->changeMineables)($manny->sector ?? $probe->currentSector, [$objectId], function (\VonNeumannGame\Sector\SectorContent $sector) use ($manny, $probe, $now, $objectId): Manny {
+            $target = $sector->findObjectById($objectId);
+            $result = ['lastTask' => Manny::TASK_REFUELING_MOTORIZED_ASTEROID, 'objectId' => $objectId];
+            $refueled = false;
+            if (!$target instanceof Asteroid) {
+                $result += ['result' => 'failed', 'failureReason' => 'asteroid_not_found'];
+            } elseif (!$target->isMotorized()) {
+                $result += ['result' => 'failed', 'failureReason' => 'asteroid_not_motorized'];
+            } elseif ($target->getMotorFuelStatus() === Asteroid::MOTOR_FUEL_FULL) {
+                $result += ['result' => 'already_completed', 'asteroid' => $target->toArray()];
+                $refueled = true;
+            } elseif (($this->hasActiveTrajectory)($objectId)) {
+                $result += ['result' => 'failed', 'failureReason' => 'asteroid_trajectory_already_active'];
+            } else {
+                $target = $target->withMotorFuelStatus(Asteroid::MOTOR_FUEL_FULL);
+                $sector->replaceObject($target);
+                $result += ['result' => 'success', 'asteroid' => $target->toArray()];
+                $refueled = true;
+            }
 
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        if ($refueled) {
-            $returnSeconds = ($this->miningTravelSeconds)();
-            $manny->currentTask = Manny::TASK_RETURNING;
-            $manny->taskStartedAt = $now->format('c');
-            $manny->taskEndsAt = $now->modify('+' . $returnSeconds . ' seconds')->format('c');
-            $manny->taskPayload = $result + ['reason' => 'asteroid_refueling_completed', 'durationSeconds' => $returnSeconds];
-            ($this->removeMannyFromSector)($manny);
-        } else {
-            ($this->clearTask)($manny, $result);
-            ($this->registerMannyInSector)($manny, \VonNeumannGame\Sector\SectorManny::STATE_FORGOTTEN);
-        }
-        ($this->saveManny)($manny);
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            if ($refueled) {
+                $returnSeconds = ($this->miningTravelSeconds)();
+                $manny->currentTask = Manny::TASK_RETURNING;
+                $manny->taskStartedAt = $now->format('c');
+                $manny->taskEndsAt = $now->modify('+' . $returnSeconds . ' seconds')->format('c');
+                $manny->taskPayload = $result + ['reason' => 'asteroid_refueling_completed', 'durationSeconds' => $returnSeconds];
+                ($this->removeMannyFromSector)($manny);
+            } else {
+                ($this->clearTask)($manny, $result);
+                ($this->registerMannyInSector)($manny, \VonNeumannGame\Sector\SectorManny::STATE_FORGOTTEN);
+            }
+            ($this->saveManny)($manny);
 
-        return ($this->findMannyById)($manny->id) ?? $manny;
+            return ($this->findMannyById)($manny->id) ?? $manny;
+        });
     }
 }

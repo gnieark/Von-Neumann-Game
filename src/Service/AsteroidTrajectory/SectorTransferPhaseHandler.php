@@ -42,40 +42,42 @@ final class SectorTransferPhaseHandler implements PhaseHandlerInterface
     {
         $direction = $trajectory->direction ?? throw new \LogicException('Transfer trajectory has no direction.');
         $nextSectorCoordinates = $trajectory->currentSector->add($direction['x'], $direction['y'], $direction['z']);
-        $sector = $this->sectors->getOrCreateSector($nextSectorCoordinates);
-        $crossing = $trajectory->sectorsCrossed + 1;
-        $candidates = $this->candidates($sector);
-        $capturedBy = $this->capture->resolve($trajectory->uid, $crossing, $nextSectorCoordinates->toKey(), $trajectory->capturePenaltySteps, $candidates);
-        if ($capturedBy !== null) {
-            return $this->captureAsteroid($trajectory, $sector, $capturedBy, $crossing, $now);
-        }
-        if ($crossing >= $trajectory->maximumSectorCrossings) {
-            return $this->trajectories->transition($trajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
-                'status' => AsteroidTrajectory::STATUS_LOST,
+        return $this->sectors->changeMineablesAfterCommit($nextSectorCoordinates, [$trajectory->asteroidId], function (SectorContent $sector) use ($trajectory, $now, $nextSectorCoordinates): AsteroidTrajectory {
+            $crossing = $trajectory->sectorsCrossed + 1;
+            $candidates = $this->candidates($sector);
+            $capturedBy = $this->capture->resolve($trajectory->uid, $crossing, $nextSectorCoordinates->toKey(), $trajectory->capturePenaltySteps, $candidates);
+            if ($capturedBy !== null) {
+                return $this->captureAsteroid($trajectory, $sector, $capturedBy, $crossing, $now);
+            }
+            if ($crossing >= $trajectory->maximumSectorCrossings) {
+                $this->sectors->mineableStocks()->delete($trajectory->asteroidId);
+                return $this->trajectories->transition($trajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
+                    'status' => AsteroidTrajectory::STATUS_LOST,
+                    'current_sector_x' => $nextSectorCoordinates->getX(),
+                    'current_sector_y' => $nextSectorCoordinates->getY(),
+                    'current_sector_z' => $nextSectorCoordinates->getZ(),
+                    'sectors_crossed' => $crossing,
+                    'capture_penalty_steps' => $trajectory->capturePenaltySteps + 1,
+                    'result' => 'crossing_limit_reached',
+                ]);
+            }
+
+            $next = $now->modify('+' . max(1, $this->crossingDurationSeconds) . ' seconds')->format('c');
+            $updated = $this->trajectories->transition($trajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
                 'current_sector_x' => $nextSectorCoordinates->getX(),
                 'current_sector_y' => $nextSectorCoordinates->getY(),
                 'current_sector_z' => $nextSectorCoordinates->getZ(),
                 'sectors_crossed' => $crossing,
                 'capture_penalty_steps' => $trajectory->capturePenaltySteps + 1,
-                'result' => 'crossing_limit_reached',
+                'next_transition_at' => $next,
             ]);
-        }
-
-        $next = $now->modify('+' . max(1, $this->crossingDurationSeconds) . ' seconds')->format('c');
-        $updated = $this->trajectories->transition($trajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
-            'current_sector_x' => $nextSectorCoordinates->getX(),
-            'current_sector_y' => $nextSectorCoordinates->getY(),
-            'current_sector_z' => $nextSectorCoordinates->getZ(),
-            'sectors_crossed' => $crossing,
-            'capture_penalty_steps' => $trajectory->capturePenaltySteps + 1,
-            'next_transition_at' => $next,
-        ]);
-        $this->events->schedule('asteroid.trajectory.phase', 'asteroid_trajectory', $updated->id, $next, [
-            'trajectoryId' => $updated->id,
-            'expectedStatus' => AsteroidTrajectory::STATUS_CROSSING_SECTOR,
-            'expectedSectorsCrossed' => $updated->sectorsCrossed,
-        ]);
-        return $updated;
+            $this->events->schedule('asteroid.trajectory.phase', 'asteroid_trajectory', $updated->id, $next, [
+                'trajectoryId' => $updated->id,
+                'expectedStatus' => AsteroidTrajectory::STATUS_CROSSING_SECTOR,
+                'expectedSectorsCrossed' => $updated->sectorsCrossed,
+            ]);
+            return $updated;
+        });
     }
 
     /** @return list<array{id:string,type:string,mass:float}> */
@@ -105,9 +107,9 @@ final class SectorTransferPhaseHandler implements PhaseHandlerInterface
 
     private function captureAsteroid(AsteroidTrajectory $trajectory, SectorContent $sector, array $candidate, int $crossing, \DateTimeImmutable $now): AsteroidTrajectory
     {
-        $asteroid = Asteroid::fromArray($trajectory->asteroidSnapshot);
+        $asteroid = Asteroid::fromDescriptor($trajectory->asteroidSnapshot);
         if ($sector->findObjectById($asteroid->getId()) !== null) {
-            $asteroid = $asteroid->withId('mtr_' . bin2hex(random_bytes(12)));
+            throw new \LogicException('Transit asteroid identity is already present in its destination sector.');
         }
         $status = AsteroidTrajectory::STATUS_CAPTURED;
         $result = 'captured_by_' . $candidate['type'];
@@ -159,10 +161,9 @@ final class SectorTransferPhaseHandler implements PhaseHandlerInterface
             $nextTransition = $now->modify('+' . $delay . ' seconds')->format('c');
         }
         $this->restoreAttachments($sector, $trajectory->attachmentsSnapshot, $asteroid->getId());
-        $this->sectors->saveSector($sector);
         $updated = $this->trajectories->transition($trajectory->id, [AsteroidTrajectory::STATUS_CROSSING_SECTOR], [
             'asteroid_id' => $asteroid->getId(),
-            'asteroid_snapshot_json' => json_encode($asteroid->toArray(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'asteroid_snapshot_json' => json_encode($asteroid->toDescriptor(), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'status' => $status,
             'current_sector_x' => $sector->getCoordinates()->getX(), 'current_sector_y' => $sector->getCoordinates()->getY(), 'current_sector_z' => $sector->getCoordinates()->getZ(),
             'sectors_crossed' => $crossing, 'next_transition_at' => $nextTransition, 'result' => $result,

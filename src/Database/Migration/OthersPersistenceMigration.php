@@ -58,15 +58,24 @@ final class OthersPersistenceMigration
                 }
             } else { throw new \RuntimeException('Unsupported legacy operation ' . $row['operation_type']); }
             $changes = [];
-            foreach ($objects as $object) { $changes[] = ['id' => $object->getId(), 'before' => $content->findObjectById($object->getId())?->toArray(), 'after' => $object->toArray()]; }
+            foreach ($objects as $object) { $changes[] = ['id' => $object->getId(), 'before' => $content->findObjectById($object->getId())?->toDescriptor(), 'after' => $object->toArray()]; }
             $operations[] = [$row, $sector, $changes];
         }
         if (!$apply) { return ['apply' => false, 'pendingOperations' => count($operations)]; }
         $this->upgradeSchema();
+        (new SectorCreationSchemaMigration($this->pdo))->run(true);
         $outbox = new SectorEffectService(new SectorEffectRepository($this->pdo), new ScheduledEventRepository($this->pdo), $this->sectors);
         $this->pdo->beginTransaction();
         try {
             foreach ($operations as [$row, $sector, $changes]) {
+                foreach ($changes as &$change) {
+                    if (\VonNeumannGame\Sector\MineableDescriptors::covers($change['after'])) {
+                        $change['id'] = $this->sectors->mineableStocks()->create('migrated-' . $row['public_id'] . ':' . $change['id'], $change['id'], $change['after']['resourceAmounts']);
+                        $change['after']['id'] = $change['id'];
+                    }
+                    $change['after'] = \VonNeumannGame\Sector\MineableDescriptors::descriptor($change['after']);
+                }
+                unset($change);
                 if ($changes !== []) { $outbox->enqueue('migrated-' . $row['public_id'], $sector, 'patch_objects', '', ['changes' => $changes], gmdate('c')); }
                 $this->pdo->prepare("UPDATE others_cross_store_operations SET sector_applied=1,status='migrated',updated_at=? WHERE id=?")->execute([gmdate('c'), $row['id']]);
             }

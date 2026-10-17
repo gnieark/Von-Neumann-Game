@@ -1000,6 +1000,11 @@ final class ProbeStorageService
         return false;
     }
 
+    public function lockMannyPlacement(NeumannProbe $probe): void
+    {
+        $this->containers->lockForMannyPlacement($probe->id);
+    }
+
     public function placeMannyOnProbe(NeumannProbe $probe, Manny $manny): bool
     {
         $this->ensureProbeStorage($probe);

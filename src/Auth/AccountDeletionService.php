@@ -42,28 +42,21 @@ final class AccountDeletionService
             return $stats;
         }
 
-        foreach ($detachedMannies as $manny) {
-            $this->registerAbandonedManny($manny);
-        }
-
-        $this->pdo->beginTransaction();
-        try {
-            foreach ($detachedMannies as $manny) {
-                $this->detachManny($manny);
-            }
-
+        (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($probeIds, $player): void {
             foreach ($probeIds as $probeId) {
-                $this->deleteProbeData($probeId);
+                $this->probes->withProbeLock($probeId, function () use ($probeId): void {
+                    foreach ($this->mannies->findByProbeId($probeId) as $manny) {
+                        if ($manny->isOnProbe() || $manny->sector === null) { continue; }
+                        $this->mannies->withMannyLock($manny->id, function (Manny $manny): void {
+                            $this->detachManny($manny);
+                            $this->registerAbandonedManny($manny);
+                        });
+                    }
+                    $this->deleteProbeData($probeId);
+                });
             }
-
             $this->deletePlayerData($player->id);
-            $this->pdo->commit();
-        } catch (\Throwable $error) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
+        });
 
         return $stats;
     }
@@ -129,7 +122,6 @@ final class AccountDeletionService
             return;
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
         $object = new SectorManny(
             SectorManny::objectIdForUid($manny->uid),
             $manny->name,
@@ -139,10 +131,7 @@ final class AccountDeletionService
             'Manny abandoned after its owner account was deleted.',
         );
 
-        if (!$sector->replaceObject($object)) {
-            $sector->addObject($object);
-        }
-        $this->sectors->saveSector($sector);
+        $this->sectors->publishAbandonedManny($manny->sector, $object);
     }
 
     private function detachManny(Manny $manny): void
@@ -155,6 +144,7 @@ final class AccountDeletionService
         $stmt = $this->pdo->prepare(
             'UPDATE mannies
              SET probe_id = NULL,
+                 is_forgotten = 0,
                  storage_container_id = NULL,
                  location_type = :location_type,
                  current_task = NULL,

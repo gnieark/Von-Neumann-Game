@@ -1798,7 +1798,7 @@ foreach ([
         ]);
     }
 }
-$statsRankingService = new UniverseStatsService($statsRankingPdo, $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe');
+$statsRankingService = new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($statsRankingPdo), $tmp . DIRECTORY_SEPARATOR . 'stats-ranking-universe');
 $test->assertEquals(0, $statsRankingService->collect()['metrics']['othersOccupiedSectors'], 'public stats report zero occupied sectors without Others ships');
 $statsRankingOthers = new OthersRepository($statsRankingPdo);
 foreach ([
@@ -1863,7 +1863,7 @@ $statsDistanceDeadProbe->status = ProbeStatus::Dead;
 $statsDistanceProbes->save($statsDistanceDeadProbe);
 $statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Probe', new SectorCoordinates(4, 0, 0));
 $statsDistanceProbes->createForPlayer($statsDistancePlayerTwo->id, 'Stats Distance Two Far Probe', new SectorCoordinates(14, 0, 0));
-$statsDistanceStats = (new UniverseStatsService($statsDistancePdo, $tmp . DIRECTORY_SEPARATOR . 'stats-distance-universe'))->collect();
+$statsDistanceStats = (new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($statsDistancePdo), $tmp . DIRECTORY_SEPARATOR . 'stats-distance-universe'))->collect();
 $test->assertEquals(3, $statsDistanceStats['metrics']['closestProbeDistance'] ?? null, 'public stats closest-probe distance ignores probes owned by the same player');
 $topFurthestPlayers = $statsDistanceStats['metrics']['topFurthestPlayersFromHome'] ?? [];
 $test->assertEquals('Stats Distance Two', $topFurthestPlayers[0]['playerName'] ?? null, 'public stats furthest-from-home podium ranks players by their furthest probe');
@@ -2694,14 +2694,24 @@ $visitedSectors = new VisitedSectorRepository($pdo);
 $detachedStorageContainers = new DetachedStorageContainerRepository($pdo);
 $sectorRepository = new SectorFileRepository($universePath);
 // Fixtures deliberately replace sector contents; production writes retain the CAS check.
-$saveSectorFixture = static function (SectorContent $content) use ($sectorRepository): void {
+$saveSectorFixture = static function (SectorContent $content) use ($sectorRepository, $pdo): void {
+    (new \VonNeumannGame\Database\StorageTransaction($pdo))->run(function () use ($content, $pdo): void {
+        $stocks = new \VonNeumannGame\Repository\MineableObjectStockRepository($pdo);
+        $content->mapMineables(static function (array $object) use ($stocks, $pdo): array {
+            $stocks->reserveHistoricalIdentity($object['id']);
+            $pdo->prepare('DELETE FROM mineable_object_stocks WHERE object_id=?')->execute([$object['id']]);
+            $amounts = \VonNeumannGame\Domain\MineableResourceAmounts::normalize($object['resourceAmounts']);
+            $pdo->prepare('INSERT INTO mineable_object_stocks(object_id,deuterium,metals,ice,carbon_compounds,version) VALUES(?,?,?,?,?,1)')->execute([$object['id'], ...array_values($amounts)]);
+            return $object;
+        });
+    });
     if ($sectorRepository->exists($content->getCoordinates())) {
         $content->markPersisted($sectorRepository->load($content->getCoordinates())->persistedRevision());
     }
     $sectorRepository->save($content);
 };
 $depotRepository = new \VonNeumannGame\Repository\GerminationDepotRepository($pdo);
-$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', detachedContainers: $detachedStorageContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
+$sectorService = new SectorService($sectorRepository, new SectorContentGenerator(), 'api-test-world', pdo: $pdo, detachedContainers: $detachedStorageContainers, germinationDepots: $depotRepository, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo));
 $storage = new ProbeStorageService($storageContainers, $items, $mannies, $probes, improvements: $probeImprovements);
 $storageTransaction = new \VonNeumannGame\Database\StorageTransaction($pdo);
 $storageLocks = new \VonNeumannGame\Repository\Storage\StorageLockRepository($pdo);
@@ -3437,7 +3447,7 @@ $test->assertEquals(0.05, $itemJettison->body['jettisoned']['containerSpaceEce']
 $test->assertEquals([], $itemJettison->body['inventory']['items'] ?? null, 'Others missile jettison removes the item from ship inventory');
 $itemJettisonReplay = $kernel->handle('POST', $jettisonPath, $itemJettisonHeaders, $itemJettisonBody);
 $test->assertEquals(json_decode(json_encode($itemJettison->body, JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR), $itemJettisonReplay->body, 'Others missile jettison idempotency replay returns the original JSON response');
-$driftingAfter = $sectorRepository->load($jettisonSector)->findObjectById($driftingMissileObjectId);
+$driftingAfter = $sectorService->getOrCreateSector($jettisonSector)->findObjectById($driftingMissileObjectId);
 $test->assertEquals($driftingBeforeCount + 1, $driftingAfter instanceof SectorDriftingItem ? $driftingAfter->getQuantity() : null, 'Others missile jettison replay does not duplicate the drifting item');
 $missingJettisonItem = $kernel->handle('POST', $jettisonPath, $othersAlertHeaders, $itemJettisonBody);
 $test->assertEquals(404, $missingJettisonItem->status, 'Others missile jettison cannot consume a missing item');
@@ -4151,13 +4161,13 @@ $destroyedWreckMothership = $othersService->damageShip(
     responsiblePlayerId: $multiProbePlayer->id,
 );
 $test->assert($destroyedWreckMothership !== null && $destroyedWreckMothership['destroyed_at'] !== null, 'destroying an Others mothership completes the canonical ship destruction');
-$wreckSectorAfterDestruction = $sectorRepository->load($secondaryProbe->currentSector);
+$wreckSectorAfterDestruction = $sectorService->getOrCreateSector($secondaryProbe->currentSector);
 $wreckObject = $wreckSectorAfterDestruction->findObjectById($wreckObjectId);
 $test->assert($wreckObject instanceof DormantConstruct, 'destroying an Others mothership creates its persistent dormant construct wreck');
 $test->assertEquals(DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK, $wreckObject instanceof DormantConstruct ? $wreckObject->getSubtype() : null, 'mothership destruction creates only the canonical wreck subtype');
 $test->assertEquals(2_500_000_000.0, $wreckObject instanceof DormantConstruct ? $wreckObject->getMass() : null, 'mothership wreck uses the configured kilogram mass');
 $test->assertEquals(400.0, $wreckObject instanceof DormantConstruct ? $wreckObject->getRadius() : null, 'mothership wreck uses the configured meter radius');
-$test->assertEquals(['deuterium' => 12.5, 'metals' => 8000, 'ice' => 400, 'carbon_compounds' => 1200], $wreckObject instanceof DormantConstruct ? $wreckObject->getResourceAmounts() : null, 'mothership wreck copies physical inventory amounts including reserved material but excludes propulsion fuel and fleet cargo');
+$test->assertEquals(['deuterium' => 12.5, 'metals' => 8000.0, 'ice' => 400.0, 'carbon_compounds' => 1200.0], $wreckObject instanceof DormantConstruct ? $wreckObject->getResourceAmounts() : null, 'mothership wreck copies physical inventory amounts including reserved material but excludes propulsion fuel and fleet cargo');
 $test->assertEquals(0, (int) $pdo->query('SELECT COUNT(*) FROM others_inventory_resources WHERE ship_id=' . (int) $wreckMothership['id'])->fetchColumn(), 'destroyed mothership SQL resources are removed after the wreck snapshot');
 $wreckMissiles = $wreckSectorAfterDestruction->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE));
 $test->assert($wreckMissiles instanceof SectorDriftingItem, 'compatible mothership components become drifting probe items');
@@ -4178,13 +4188,13 @@ $test->assert(str_contains($wreckDetectionAlerts[0]->message ?? '', 'destroyed b
 $pdo->prepare("UPDATE probe_damage_warnings SET status='read',read_at=:now,updated_at=:now WHERE type='sector_object_detected' AND object_id=:object_id")
     ->execute(['now' => gmdate('c'), 'object_id' => $wreckObjectId]);
 $othersService->damageShip((string) $wreckMothership['public_id'], 100, 'wreck-feature-missile-impact', ['type' => 'missile', 'missileId' => 'missile_wreck_feature'], responsiblePlayerId: $multiProbePlayer->id);
-$wreckSectorAfterReplay = $sectorRepository->load($secondaryProbe->currentSector);
+$wreckSectorAfterReplay = $sectorService->getOrCreateSector($secondaryProbe->currentSector);
 $replayedWrecks = array_values(array_filter($wreckSectorAfterReplay->getObjects(), static fn($object): bool => $object instanceof DormantConstruct && $object->getId() === $wreckObjectId));
 $replayedWreckMissiles = $wreckSectorAfterReplay->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_MISSILE));
 $test->assertEquals(1, count($replayedWrecks), 'replaying mothership damage does not duplicate its wreck');
 $test->assertEquals(2, $replayedWreckMissiles instanceof SectorDriftingItem ? $replayedWreckMissiles->getQuantity() : null, 'replaying mothership damage does not duplicate drifting missiles');
 $test->assertEquals($wreckCounterBefore + 1, $players->findById($multiProbePlayer->id)?->othersMothershipsDestroyed, 'replaying mothership damage does not duplicate victory counters');
-$wreckOperationStatement = $pdo->prepare("SELECT COUNT(*) FROM sector_effects WHERE effect_type='patch_objects' AND status='applied' AND payload_json LIKE ?");
+$wreckOperationStatement = $pdo->prepare("SELECT COUNT(*) FROM sector_effects WHERE effect_type='add_object' AND status='applied' AND payload_json LIKE ?");
 $wreckOperationStatement->execute(['%' . $wreckObjectId . '%']);
 $test->assertEquals(1, (int) $wreckOperationStatement->fetchColumn(), 'mothership wreck has one committed and applied sector intention');
 $wreckOperationStatement->closeCursor();
@@ -4872,7 +4882,7 @@ $multiScanVisited = new VisitedSectorRepository($multiScanPdo);
 $multiScanDetachedStorageContainers = new DetachedStorageContainerRepository($multiScanPdo);
 $multiScanUniversePath = $tmp . DIRECTORY_SEPARATOR . 'multi-scan-universe';
 $multiScanSectorRepository = new SectorFileRepository($multiScanUniversePath);
-$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', detachedContainers: $multiScanDetachedStorageContainers, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($multiScanPdo));
+$multiScanSectorService = new SectorService($multiScanSectorRepository, new SectorContentGenerator(), 'multi-scan-world', pdo: $multiScanPdo, detachedContainers: $multiScanDetachedStorageContainers, effects: new \VonNeumannGame\Repository\Storage\SectorEffectRepository($multiScanPdo));
 $multiScanStorage = new ProbeStorageService($multiScanStorageContainers, $multiScanItems, $multiScanMannies, $multiScanProbes, improvements: $multiScanProbeImprovements);
 $multiScanAuth = new AuthService($multiScanPlayers, $multiScanAuthMethods, $multiScanProbes, $multiScanSessions, $multiScanVisited, $multiScanStorage, 7, $multiScanMannies, $multiScanApiKeys, $multiScanSectorService);
 $multiScanMissionService = new MissionService($multiScanMissions, $multiScanMessages, [], 'multi-scan-world', $multiScanSectorService, $multiScanProbes, $multiScanPlayers);
@@ -5321,6 +5331,7 @@ if ($createdProbe !== null) {
     $addConstructCoordinates = new SectorCoordinates(6, 0, 0);
     $addConstructCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --sector=6:0:0';
     exec($addConstructCommand . ' 2>&1', $addConstructOutput, $addConstructStatus);
@@ -5332,6 +5343,7 @@ if ($createdProbe !== null) {
     $forcedConstructCoordinates = new SectorCoordinates(8, 0, 0);
     $forcedConstructCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --type=anatiform-asteroid-sculpting'
         . ' --sector=8:0:0';
@@ -5347,6 +5359,7 @@ if ($createdProbe !== null) {
 
     $listConstructTypesCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --list-types';
     exec($listConstructTypesCommand . ' 2>&1', $listConstructTypesOutput, $listConstructTypesStatus);
     $listConstructTypesText = implode("\n", $listConstructTypesOutput);
@@ -5357,6 +5370,7 @@ if ($createdProbe !== null) {
 
     $missingWreckSourceCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --type=relativistic_path_clearing'
         . ' --sector=10:0:0';
@@ -5368,6 +5382,7 @@ if ($createdProbe !== null) {
     $cliWreckCoordinates = new SectorCoordinates(12, 0, 0);
     $addWreckCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --type=relativistic_path_clearing'
         . ' --source-ship-id=' . escapeshellarg($cliWreckSourceId)
@@ -5382,6 +5397,7 @@ if ($createdProbe !== null) {
 
     $invalidConstructTypeCommand = escapeshellarg(PHP_BINARY)
         . ' ' . escapeshellarg($root . '/scripts/add-dormant-construct.php')
+        . ' --database-config=' . escapeshellarg($userinfosDbConfig)
         . ' --universe-path=' . escapeshellarg($cliSectorUniverse)
         . ' --type=definitely-not-a-construct'
         . ' --sector=14:0:0';
@@ -5547,7 +5563,7 @@ if ($createdProbe !== null) {
     $deuteriumAsteroidText = implode("\n", $deuteriumAsteroidOutput);
     $test->assertEquals(0, $deuteriumAsteroidStatus, 'deuterium asteroid CLI exits successfully');
     $test->assert(str_contains($deuteriumAsteroidText, 'alert id:'), 'deuterium asteroid CLI creates an alert');
-    $deuteriumSector = $sectorRepository->load($createdProbe->currentSector);
+    $deuteriumSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $deuteriumAsteroids = array_values(array_filter(
         $deuteriumSector->getObjects(),
         static fn($object): bool => $object instanceof Asteroid
@@ -5612,7 +5628,7 @@ if ($createdProbe !== null) {
     $test->assert(str_contains($lowFuelText, 'Players eligible without existing deuterium asteroid: 1'), 'low-fuel CLI ignores an asteroid exhausted by mining');
     $test->assert(str_contains($lowFuelText, 'skipped existing deuterium asteroid: 0'), 'low-fuel CLI does not treat an exhausted asteroid as an existing reserve');
     $test->assert(str_contains($lowFuelText, 'processed: 1'), 'low-fuel CLI adds assistance after the previous asteroid is exhausted');
-    $refilledDeuteriumSector = $sectorRepository->load($createdProbe->currentSector);
+    $refilledDeuteriumSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $usableDeuteriumAsteroids = array_values(array_filter(
         $refilledDeuteriumSector->getObjects(),
         static fn($object): bool => $object instanceof Asteroid
@@ -5683,7 +5699,7 @@ $test->assert($visitedSectors->hasVisited($oauthPlayer, $oauthPlayer->homeSector
 if ($oauthProbe !== null) {
     $oauthProbe->excludeFromStats = true;
     $probes->save($oauthProbe);
-    $stats = (new UniverseStatsService($pdo, $universePath))->collect();
+    $stats = (new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($pdo), $universePath))->collect();
     $test->assertEquals(1, $stats['metrics']['probesInUniverse'] ?? null, 'public stats exclude probes marked as test probes');
     $topVisitedPlayers = $stats['metrics']['topVisitedPlayers'] ?? [];
     $test->assertEquals('Remi', $topVisitedPlayers[0]['playerName'] ?? null, 'public stats podium ranks included players by visited sectors');
@@ -5735,7 +5751,7 @@ if ($oauthProbe !== null) {
             0.8,
         ),
     ]));
-    $habitabilityStats = (new UniverseStatsService($pdo, $statsUniversePath))->collect();
+    $habitabilityStats = (new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($pdo), $statsUniversePath))->collect();
     $test->assertEquals(3, $habitabilityStats['metrics']['habitablePlanetsInGeneratedSectors'] ?? null, 'public stats count habitable planets in generated sectors');
     $test->assertEquals(1, $habitabilityStats['metrics']['habitablePlanetsInVisitedSectors'] ?? null, 'public stats count habitable planets in visited sectors');
     $test->assertEquals(1, $habitabilityStats['metrics']['intelligentLifeWorlds'] ?? null, 'public stats count discovered intelligent-life worlds');
@@ -5782,17 +5798,8 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $mannies->save($outsideManny);
 
     $deleteSector = $sectorService->getOrCreateSector($deleteProbe->currentSector);
-    $forgottenMannyObject = new SectorManny(
-        SectorManny::objectIdForUid($outsideManny->uid),
-        $outsideManny->name,
-        $outsideManny->uid,
-        SectorManny::STATE_FORGOTTEN,
-        $outsideManny->cargoArray(),
-        'Manny left behind by its probe.',
-    );
-    if (!$deleteSector->replaceObject($forgottenMannyObject)) {
-        $deleteSector->addObject($forgottenMannyObject);
-    }
+    (new \VonNeumannGame\Database\StorageTransaction($pdo))->run(fn() => $mannies->setForgotten($outsideManny, true));
+
     $deleteDetachedContainerId = 'detached-container-deleted-probe';
     $deleteSector->addObject(new SectorDetachedContainer(
         $deleteDetachedContainerId,
@@ -5852,7 +5859,7 @@ if ($deleteProbe !== null && $createdProbe !== null && count($deleteMannies) >= 
     $persistentWreck = $detachedStorageContainers->findByObjectId($deleteDetachedContainerId);
     $test->assert($persistentWreck instanceof SectorDetachedContainer, 'account deletion preserves detached containers owned by destroyed probes');
     $test->assertEquals($deleteProbe->id, $persistentWreck?->getOwnerProbeId(), 'detached containers preserve the historical destroyed-probe id');
-    $deletedPlayerSector = $sectorRepository->load($deleteProbe->currentSector);
+    $deletedPlayerSector = $sectorService->getOrCreateSector($deleteProbe->currentSector);
     $abandonedMannyObject = $deletedPlayerSector->findObjectById(SectorManny::objectIdForUid($outsideManny->uid));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedMannyObject?->toArray()['state'] ?? null, 'account deletion marks outside sector Mannys as abandoned');
 }
@@ -5865,7 +5872,7 @@ if ($orphanProbe !== null) {
             SectorManny::objectIdForUid('mny_deleted_owner'),
             'orphaned-manny',
             'mny_deleted_owner',
-            SectorManny::STATE_FORGOTTEN,
+            SectorManny::STATE_ABANDONED,
             [],
             'Manny left behind by a vanished probe.',
         ),
@@ -5874,13 +5881,13 @@ if ($orphanProbe !== null) {
         ->observe($orphanObserver, $orphanProbe, $orphanProbe->currentSector)
         ->toArray();
     $orphanManny = $orphanObservation['objects'][0] ?? null;
-    $test->assertEquals(SectorManny::STATE_ABANDONED, $orphanManny['mannyState'] ?? null, 'orphaned forgotten sector Mannys become abandoned on observation');
-    $test->assertEquals(true, $orphanManny['salvageable'] ?? null, 'orphaned forgotten sector Mannys become salvageable');
-    $persistedOrphanSector = $sectorRepository->load($orphanProbe->currentSector);
+    $test->assertEquals(SectorManny::STATE_ABANDONED, $orphanManny['mannyState'] ?? null, 'explicitly migrated orphan Mannys remain abandoned on observation');
+    $test->assertEquals(true, $orphanManny['salvageable'] ?? null, 'explicitly migrated orphan Mannys remain salvageable');
+    $persistedOrphanSector = $sectorService->getOrCreateSector($orphanProbe->currentSector);
     $test->assertEquals(
         SectorManny::STATE_ABANDONED,
         $persistedOrphanSector->findObjectById(SectorManny::objectIdForUid('mny_deleted_owner'))?->toArray()['state'] ?? null,
-        'orphaned forgotten Manny conversion is persisted to sector JSON',
+        'observation preserves the migrated abandoned Manny descriptor',
     );
 }
 
@@ -7785,7 +7792,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
         $test->assertEquals(Manny::LOCATION_SECTOR, $remoteScutRecalledManny?->locationType, 'remote SCUT recalled Manny remains outside the probe');
         $test->assert($remoteScutRecalledManny?->sector !== null && $remoteScutRecalledManny->sector->equals($detachProbe->currentSector), 'remote SCUT recalled Manny remains in its task sector');
         $test->assertEquals($detachProbe->id, $remoteScutRecalledManny?->probeId, 'remote SCUT recalled Manny keeps its owner probe link');
-        $remoteScutForgottenObject = $sectorRepository->load($detachProbe->currentSector)->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId));
+        $remoteScutForgottenObject = $sectorService->getOrCreateSector($detachProbe->currentSector)->findObjectById(SectorManny::objectIdForUid($detachSecondMannyId));
         $test->assertEquals(SectorManny::STATE_FORGOTTEN, $remoteScutForgottenObject?->toArray()['state'] ?? null, 'remote SCUT recall registers the Manny as forgotten in its sector');
         $remoteScutForgottenList = $kernel->handle('GET', '/api/probe/mannies', $detachHeaders);
         $remoteScutForgottenManny = array_values(array_filter(
@@ -7881,7 +7888,7 @@ if ($detachProbe !== null && $detachMannyId !== '') {
             $remoteScutInspectCompletedList->body['mannies'] ?? [],
             static fn(array $manny): bool => ($manny['id'] ?? null) === $detachSecondMannyId,
         ))[0] ?? null;
-        $remoteScutInspectedSector = $sectorRepository->load($detachProbe->currentSector);
+        $remoteScutInspectedSector = $sectorService->getOrCreateSector($detachProbe->currentSector);
         $test->assertEquals(null, $remoteScutInspectCompletedManny['currentTask'] ?? null, 'completed remote same-SCUT inspection leaves the Manny inactive');
         $test->assertEquals('success', $remoteScutInspectCompletedManny['task']['result'] ?? null, 'completed remote same-SCUT inspection records its result');
         $test->assertEquals('scut_network', $remoteScutInspectCompletedManny['taskVisibility'] ?? null, 'completed remote same-SCUT inspection remains visible through SCUT telemetry');
@@ -8219,7 +8226,7 @@ if ($oracleProbe !== null) {
     $oracleMessages = $messages->receivedByProbe($oracleProbe->id);
     $test->assertEquals(MissionService::ORACLE_INITIAL_MESSAGE, $oracleMessages[0]->body ?? null, 'Oracle planet directly sends the translated initial message');
     $test->assertEquals(ProbeMessage::ENDPOINT_PLANET, $oracleMessages[0]->senderType ?? null, 'Oracle initial message comes from the planet');
-    $oracleArchives = $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE));
+    $oracleArchives = $sectorService->getOrCreateSector($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE));
     $test->assert($oracleArchives instanceof SectorDriftingItem, 'Oracle contact places biological archives in open-space drift');
     $test->assertEquals(2, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getQuantity() : null, 'Oracle contact places two biological archives');
     $test->assertEquals(0.05, $oracleArchives instanceof SectorDriftingItem ? $oracleArchives->getContainerSpace() : null, 'each biological archive occupies the same ECE volume as a Manny');
@@ -8231,7 +8238,7 @@ if ($oracleProbe !== null) {
     $sameOracleMission = $oracleMissionService->startIntelligentLifeScenario($oracleProbe, $oracleSector, $oraclePlanet);
     $test->assertEquals($oracleMission?->uid, $sameOracleMission?->uid, 'Oracle scenario initialization is idempotent');
     $test->assertEquals(1, $messages->countReceivedByProbe($oracleProbe->id), 'Oracle initial message is sent only once');
-    $test->assertEquals(2, $sectorRepository->load($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE))?->getQuantity(), 'Oracle initialization does not duplicate biological archives');
+    $test->assertEquals(2, $sectorService->getOrCreateSector($oracleSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_BIOLOGICAL_ARCHIVE))?->getQuantity(), 'Oracle initialization does not duplicate biological archives');
     $test->assertEquals(1, count($damageWarnings->findByProbeId($oracleProbe->id)), 'Oracle initialization does not duplicate its archive alert');
 
     $oracleDestinationSector = $oracleSector->add(2, 0, 0);
@@ -8394,7 +8401,7 @@ if ($failedOracleProbe !== null) {
     $sectorService->saveSector($failedOracleDropSector);
     $failedOracleMission = $missions->findByUidForPlayer($failedOraclePlayer->id, (string) $failedOracleMission?->uid);
     $test->assertEquals(Mission::STATUS_FAILED, $failedOracleMission?->status, 'Oracle fails when archives are dropped on a planet at the strict habitability threshold');
-    $failedOracleOriginAfterFailure = $sectorRepository->load($failedOracleSector)->findObjectById($failedOraclePlanet->getId());
+    $failedOracleOriginAfterFailure = $sectorService->getOrCreateSector($failedOracleSector)->findObjectById($failedOraclePlanet->getId());
     $test->assert(
         $failedOracleOriginAfterFailure instanceof Planet && !$failedOracleOriginAfterFailure->hasIntelligentLife(),
         'failed Oracle mission turns its requesting inhabited planet into an uninhabited planet',
@@ -8580,7 +8587,7 @@ if ($intelligentLifeProbe !== null) {
         $test->assertEquals('pending', $firstContactMissionAfterReply['steps'][3]['status'] ?? null, 'first-contact mission waits for carbon-compound delivery');
         $test->assertEquals('carbon_compounds', $firstContactMissionAfterReply['steps'][3]['metadata']['resourceType'] ?? null, 'carbon delivery step exposes the requested resource type');
         $test->assertEquals(1, $firstContactMissionAfterReply['steps'][3]['metadata']['amount'] ?? null, 'carbon delivery step exposes the requested amount');
-        $initialMaterialCounter = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+        $initialMaterialCounter = $sectorService->getOrCreateSector($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
         $test->assertEquals(5, $initialMaterialCounter['requirements']['metals'] ?? null, 'return-to-space counter stores the requested metals');
         $test->assertEquals(1, $initialMaterialCounter['requirements']['carbon_compounds'] ?? null, 'return-to-space counter stores the requested carbon compounds');
         $test->assertEquals([], $initialMaterialCounter['donations'] ?? null, 'return-to-space counter starts without donations');
@@ -8611,7 +8618,7 @@ if ($intelligentLifeProbe !== null) {
                 ]);
                 $processScheduledMannyNow($missionDropManny->id);
                 $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
-                $materialCounterAfterDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                $materialCounterAfterDrop = $sectorService->getOrCreateSector($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
                 $test->assertEquals(0.5, $materialCounterAfterDrop['totals']['metals'] ?? null, 'material drop counter adds dropped metals');
                 $test->assertEquals(0.4, $materialCounterAfterDrop['totals']['carbon_compounds'] ?? null, 'material drop counter adds dropped carbon compounds');
                 $test->assertEquals(4.5, $materialCounterAfterDrop['remaining']['metals'] ?? null, 'material drop counter tracks remaining metals');
@@ -8632,7 +8639,7 @@ if ($intelligentLifeProbe !== null) {
                 if ($fellowContributorProbe !== null) {
                     $fellowContributorProbe->currentSector = $intelligentLifeTarget;
                     $probes->save($fellowContributorProbe);
-                    $sectorWithFellowDonation = $sectorRepository->load($intelligentLifeTarget);
+                    $sectorWithFellowDonation = $sectorService->getOrCreateSector($intelligentLifeTarget);
                     $sectorWithFellowDonation->recordReturnToSpaceProgramMaterialDonation(
                         'life-alert-planet',
                         'Monde habite',
@@ -8656,7 +8663,7 @@ if ($intelligentLifeProbe !== null) {
                 if ($nonSolverProbe !== null) {
                     $nonSolverProbe->currentSector = $intelligentLifeTarget;
                     $probes->save($nonSolverProbe);
-                    $sectorBeforeIgnoredDonation = $sectorRepository->load($intelligentLifeTarget);
+                    $sectorBeforeIgnoredDonation = $sectorService->getOrCreateSector($intelligentLifeTarget);
                     $ignoredDonation = $missionService->handleReturnToSpaceProgramMaterialDrop(
                         $nonSolverProbe,
                         $sectorBeforeIgnoredDonation,
@@ -8701,7 +8708,7 @@ if ($intelligentLifeProbe !== null) {
                         $processScheduledMannyNow($finalDropManny->id);
                         $kernel->handle('GET', '/api/probe/mannies', $intelligentLifeHeaders);
 
-                        $materialCounterAfterFinalDrop = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                        $materialCounterAfterFinalDrop = $sectorService->getOrCreateSector($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
                         $test->assertEquals(5.0, (float) ($materialCounterAfterFinalDrop['totals'][ResourceComposition::METALS] ?? -1), 'material drop counter reaches required metals');
                         $test->assertEquals(1.0, (float) ($materialCounterAfterFinalDrop['totals'][ResourceComposition::CARBON_COMPOUNDS] ?? -1), 'material drop counter reaches required carbon compounds');
                         $test->assertEquals(0.0, (float) ($materialCounterAfterFinalDrop['remaining'][ResourceComposition::METALS] ?? -1), 'material drop counter has no remaining metals');
@@ -8735,7 +8742,7 @@ if ($intelligentLifeProbe !== null) {
                         ));
                         $test->assertEquals(0, count($completedFirstContactMissions), 'first-contact mission is not completed before the station is ready');
 
-                        $stationReadySector = $sectorRepository->load($intelligentLifeTarget);
+                        $stationReadySector = $sectorService->getOrCreateSector($intelligentLifeTarget);
                         $stationReadySector->markReturnToSpaceProgramCompletionMessageSent('life-alert-planet', gmdate('c', time() - 1));
                         $saveSectorFixture($stationReadySector);
 
@@ -8764,7 +8771,7 @@ if ($intelligentLifeProbe !== null) {
                         ));
                         $test->assertEquals(1, count($visitedStationObjects), 'visited-sector detailed scan exposes the deuterium refuel station');
 
-                        $materialCounterAfterStation = $sectorRepository->load($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
+                        $materialCounterAfterStation = $sectorService->getOrCreateSector($intelligentLifeTarget)->returnToSpaceProgramMaterialCounterForPlanet('life-alert-planet');
                         $test->assert(isset($materialCounterAfterStation['finalMessageSentAt']), 'material counter records the final station message delivery');
                         $test->assertEquals($stationObjects[0]['id'] ?? null, $materialCounterAfterStation['stationObjectId'] ?? null, 'material counter records the station object id');
 
@@ -8898,7 +8905,7 @@ $test->assertEquals(422, $jettisonDeuteriumTank->status, 'external deuterium tan
 $test->assertEquals('item_not_jettisonable', $jettisonDeuteriumTank->body['error']['code'] ?? null, 'deuterium tank jettison returns an explicit error');
 $test->assertEquals(100.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'failed deuterium tank jettison keeps fuel stock unchanged');
 if ($createdProbe !== null) {
-    $sectorWithConstruct = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithConstruct = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $sectorWithConstruct->addObject(new DormantConstruct('api-current-dormant-construct'));
     $saveSectorFixture($sectorWithConstruct);
     $currentConstructScan = $kernel->handle('GET', '/api/probe/sector', $headers);
@@ -8921,7 +8928,7 @@ $dormantInspectionPlayer = $auth->registerPlayerWithPassword('dormant-inspection
 $dormantInspectionProbe = $probes->findByPlayerId($dormantInspectionPlayer->id);
 $dormantInspectionHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($dormantInspectionPlayer)['token']];
 if ($dormantInspectionProbe !== null) {
-    $dormantInspectionSector = $sectorRepository->load($dormantInspectionProbe->currentSector);
+    $dormantInspectionSector = $sectorService->getOrCreateSector($dormantInspectionProbe->currentSector);
     $dormantInspectionSector->addObject(new DormantConstruct(
         'dormant-report-deuterium',
         inspectionScenario: ProbeImprovementCatalog::DEUTERIUM_COMPRESSION,
@@ -9067,7 +9074,7 @@ if ($dormantInspectionProbe !== null) {
     $test->assertEquals(1, count($relativisticPathReports), 'completed mothership wreck inspection creates one Manny report alert');
     $test->assert(str_contains((string) ($relativisticPathReports[0]['message'] ?? ''), 'We now know how to reproduce the result.'), 'mothership wreck report contains the canonical relativistic path clearing conclusion');
     $test->assertEquals(true, $probeImprovements->findForProbe($dormantInspectionProbe->id, ProbeImprovementCatalog::RELATIVISTIC_PATH_CLEARING)?->available, 'mothership wreck inspection unlocks relativistic path clearing for the player');
-    $test->assert($sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById($dormantInspectionWreck->getId()) instanceof DormantConstruct, 'mothership wreck remains present after inspection');
+    $test->assert($sectorService->getOrCreateSector($dormantInspectionProbe->currentSector)->findObjectById($dormantInspectionWreck->getId()) instanceof DormantConstruct, 'mothership wreck remains present after inspection');
 
     $inspectDormantRandom = $kernel->handle('POST', '/api/probe/mannies/' . rawurlencode($dormantInspectionMannyId) . '/inspect-sector-object', $dormantInspectionHeaders, json_encode([
         'objectId' => 'dormant-report-random',
@@ -9079,7 +9086,7 @@ if ($dormantInspectionProbe !== null) {
     ]);
     $processScheduledMannyNow($dormantInspectionMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $dormantInspectionHeaders);
-    $storedRandomConstruct = $sectorRepository->load($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
+    $storedRandomConstruct = $sectorService->getOrCreateSector($dormantInspectionProbe->currentSector)->findObjectById('dormant-report-random');
     $storedRandomScenario = $storedRandomConstruct instanceof DormantConstruct ? $storedRandomConstruct->toArray()['inspectionScenario'] ?? null : null;
     $test->assert(in_array($storedRandomScenario, DormantConstruct::generatableInspectionScenarios(), true), 'dormant construct inspection stores a randomly generatable scenario in sector JSON');
     $dormantInspectionScanAfterRandom = $kernel->handle('GET', '/api/probe/sector', $dormantInspectionHeaders);
@@ -9094,7 +9101,7 @@ $duckSculptingPlayer = $auth->registerPlayerWithPassword('duck-sculpting-user', 
 $duckSculptingProbe = $probes->findByPlayerId($duckSculptingPlayer->id);
 $duckSculptingHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($duckSculptingPlayer)['token']];
 if ($duckSculptingProbe !== null) {
-    $duckSculptingSector = $sectorRepository->load($duckSculptingProbe->currentSector);
+    $duckSculptingSector = $sectorService->getOrCreateSector($duckSculptingProbe->currentSector);
     $duckSculptingSector->addObject(new Asteroid(
         'cancelled-duck-rock', 'Cancelled duck rock', 'iron', ['iron', 'nickel'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
@@ -9139,14 +9146,14 @@ if ($duckSculptingProbe !== null) {
     );
     $cancelDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($cancelledSculptMannyId) . '/recall', $duckSculptingHeaders, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $cancelDuckSculpting->status, 'duck sculpting can be cancelled through Manny recall');
-    $cancelledDuckAsteroid = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('cancelled-duck-rock');
+    $cancelledDuckAsteroid = $sectorService->getOrCreateSector($duckSculptingProbe->currentSector)->findObjectById('cancelled-duck-rock');
     $test->assert($cancelledDuckAsteroid instanceof Asteroid && !$cancelledDuckAsteroid->isDuckShaped(), 'cancelling before completion leaves the asteroid ordinary');
 
     $acceptedDuckSculpting = $kernel->handle('POST', '/api/probe/' . $duckSculptingProbe->id . '/mannies/' . rawurlencode($completedSculptMannyId) . '/sculpt-duck-asteroid', $duckSculptingHeaders, json_encode([
         'objectId' => 'completed-duck-rock',
     ], JSON_THROW_ON_ERROR));
     $test->assertEquals(202, $acceptedDuckSculpting->status, 'a second Manny can start a complete duck sculpting task');
-    $beforeDuckCompletion = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
+    $beforeDuckCompletion = $sectorService->getOrCreateSector($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
     $test->assert($beforeDuckCompletion instanceof Asteroid && !$beforeDuckCompletion->isDuckShaped(), 'the asteroid remains ordinary while the two-day task is running');
     $pdo->prepare('UPDATE mannies SET task_ends_at = :ended WHERE uid = :uid')->execute([
         'uid' => $completedSculptMannyId,
@@ -9154,7 +9161,7 @@ if ($duckSculptingProbe !== null) {
     ]);
     $processScheduledMannyNow($completedSculptMannyId);
     $kernel->handle('GET', '/api/probe/mannies', $duckSculptingHeaders);
-    $completedDuckAsteroid = $sectorRepository->load($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
+    $completedDuckAsteroid = $sectorService->getOrCreateSector($duckSculptingProbe->currentSector)->findObjectById('completed-duck-rock');
     $test->assertEquals(Asteroid::DISTINCTIVE_FEATURE_DUCK_SCULPTURE, $completedDuckAsteroid instanceof Asteroid ? $completedDuckAsteroid->getDistinctiveFeature() : null, 'task completion sculpts the persisted asteroid into a duck shape');
     $test->assertEquals(1.0, $completedDuckAsteroid instanceof Asteroid ? ($completedDuckAsteroid->getResourceAmounts()['metals'] ?? null) : null, 'duck sculpting preserves asteroid resources');
 
@@ -9188,7 +9195,7 @@ $motorizePlayer = $auth->registerPlayerWithPassword('motorize-asteroid-user', 's
 $motorizeProbe = $probes->findByPlayerId($motorizePlayer->id);
 $motorizeHeaders = ['Authorization' => 'Bearer ' . $auth->createSessionForPlayer($motorizePlayer)['token']];
 if ($motorizeProbe !== null) {
-    $motorizeSector = $sectorRepository->load($motorizeProbe->currentSector);
+    $motorizeSector = $sectorService->getOrCreateSector($motorizeProbe->currentSector);
     $motorizeSector->addObject(new Asteroid(
         'motorize-rock',
         'Metal rock',
@@ -9274,10 +9281,14 @@ if ($motorizeProbe !== null) {
     $motorizedAsteroidId = (string) ($returningMotorizationManny['task']['objectId'] ?? '');
     $test->assert(str_starts_with($motorizedAsteroidId, 'mtr_'), 'first motorization replaces the asteroid id with an opaque motorization marker');
     $test->assertEquals('motorize-rock', $returningMotorizationManny['task']['previousObjectId'] ?? null, 'motorization terminal payload retains the replaced id for correlation');
-    $storedMotorizedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
+    $storedMotorizedAsteroid = $sectorService->getOrCreateSector($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assert($storedMotorizedAsteroid instanceof Asteroid && $storedMotorizedAsteroid->isMotorized(), 'completed motorization persists the asteroid motorized state');
     $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $storedMotorizedAsteroid instanceof Asteroid ? $storedMotorizedAsteroid->getMotorFuelStatus() : null, 'completed motorization fills the asteroid binary fuel tank');
     $test->assertEquals(1.0, $storedMotorizedAsteroid instanceof Asteroid ? ($storedMotorizedAsteroid->getResourceAmounts()['metals'] ?? null) : null, 'motorization preserves asteroid resources');
+    $test->assertEquals(null, $sectorService->mineableStocks()->find('motorize-rock')['version'], 'motorization removes the old SQL stock identity');
+    $test->assertEquals(1.0, $sectorService->mineableStocks()->find($motorizedAsteroidId)['amounts']['metals'], 'motorization publishes the exact SQL stock of its new identity');
+    $test->assert(!array_key_exists('resourceAmounts', $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId)->toDescriptor()), 'motorized descriptor persists no copy of live stock');
+
     $motorizedSectorScan = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/sector', $motorizeHeaders);
     $publicMotorizedAsteroid = array_values(array_filter(
         $motorizedSectorScan->body['sector']['objects'] ?? [],
@@ -9287,7 +9298,7 @@ if ($motorizeProbe !== null) {
     $test->assertEquals('full', $publicMotorizedAsteroid['motorFuelStatus'] ?? null, 'sector scans expose fuel state only for motorized asteroids');
 
     if ($storedMotorizedAsteroid instanceof Asteroid) {
-        $emptyMotorizedSector = $sectorRepository->load($motorizeProbe->currentSector);
+        $emptyMotorizedSector = $sectorService->getOrCreateSector($motorizeProbe->currentSector);
         $emptyMotorizedSector->replaceObject($storedMotorizedAsteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY));
         $saveSectorFixture($emptyMotorizedSector);
     }
@@ -9307,7 +9318,7 @@ if ($motorizeProbe !== null) {
     ]);
     $processScheduledMannyNow($refuelMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $motorizeHeaders);
-    $refueledAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
+    $refueledAsteroid = $sectorService->getOrCreateSector($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assertEquals(Asteroid::MOTOR_FUEL_FULL, $refueledAsteroid instanceof Asteroid ? $refueledAsteroid->getMotorFuelStatus() : null, 'refueling completion fills the asteroid tank exactly once');
 
     $launchTargetContainerId = 'detached-container-launch-target';
@@ -9359,9 +9370,12 @@ if ($motorizeProbe !== null) {
     $test->assertEquals(Manny::TASK_RETURNING, $launchedMiningManny?->currentTask, 'launching a motorized asteroid recalls mining Mannys targeting an attached container');
     $test->assertEquals('target_container_departed_with_asteroid', $launchedMiningManny?->taskPayload['reason'] ?? null, 'asteroid launch recall records a stable reason');
     $test->assert(!array_key_exists('originSector', $createdTransfer->body['trajectory'] ?? []) && !array_key_exists('currentSector', $createdTransfer->body['trajectory'] ?? []), 'trajectory creation never exposes absolute internal sectors');
-    $emptyLaunchedAsteroid = $sectorRepository->load($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
+    $emptyLaunchedAsteroid = $sectorService->getOrCreateSector($motorizeProbe->currentSector)->findObjectById($motorizedAsteroidId);
     $test->assertEquals(null, $emptyLaunchedAsteroid, 'sector-transfer acceptance removes the asteroid from its origin at effective departure');
     $test->assertEquals(Asteroid::MOTOR_FUEL_EMPTY, $asteroidTrajectories->findByUid($transferPublicId)?->asteroidSnapshot['motorFuelStatus'] ?? null, 'trajectory acceptance atomically persists the empty in-flight tank');
+    $test->assert(!array_key_exists('resourceAmounts', $asteroidTrajectories->findByUid($transferPublicId)?->asteroidSnapshot ?? []), 'active transit snapshots contain descriptors without resource amounts');
+    $test->assert($sectorService->mineableStocks()->find($motorizedAsteroidId)['version'] !== null, 'sector transfer retains its SQL stock while absent from the origin file');
+
     $readTransfer = $kernel->handle('GET', '/api/probe/' . $motorizeProbe->id . '/asteroid-trajectories/' . rawurlencode($transferPublicId), $motorizeHeaders);
     $test->assertEquals(200, $readTransfer->status, 'GET reads a trajectory only through a probe in its current sector');
     $test->assertEquals(['x' => 1, 'y' => 1, 'z' => 0], $readTransfer->body['trajectory']['direction'] ?? null, 'transfer telemetry exposes only the relative launch direction');
@@ -9453,7 +9467,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         $testTrajectoryProcessor->process($impactTrajectory->id, AsteroidTrajectory::STATUS_COASTING, null, $impactAt);
         $completedImpact = $asteroidTrajectories->findById($impactTrajectory->id);
         $test->assertEquals(AsteroidTrajectory::STATUS_NO_EFFECT, $completedImpact?->status, 'an impact on a star terminates with no_effect');
-        $postImpactSector = $sectorRepository->load($impactProbe->currentSector);
+        $postImpactSector = $sectorService->getOrCreateSector($impactProbe->currentSector);
         $test->assertEquals(null, $postImpactSector->findObjectById('system-impact-rock'), 'a stellar impact vaporizes the source asteroid');
         $test->assert($postImpactSector->findObjectById('system-impact-star') instanceof Star, 'a stellar impact leaves the star unchanged');
         $stellarResultAlerts = array_values(array_filter(
@@ -9481,7 +9495,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         'probe-impact-rock', 'Probe impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
     ))->withDeuteriumEngine();
-    $probeImpactSector = $sectorRepository->load($impactProbe->currentSector);
+    $probeImpactSector = $sectorService->getOrCreateSector($impactProbe->currentSector);
     $probeImpactSector->addObject($probeImpactAsteroid);
     $saveSectorFixture($probeImpactSector);
     $probeImpactLaunch = $kernel->handle(
@@ -9520,7 +9534,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
     $fatalAsteroidProbe->integrityPercent = 0.01;
     $probes->save($fatalAsteroidProbe);
     $fatalAsteroid = (new Asteroid('fatal-impact-rock', 'Fatal impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001, resourceAmounts: ['metals' => 1.0]))->withDeuteriumEngine();
-    $fatalAsteroidSector = $sectorRepository->load($impactProbe->currentSector);
+    $fatalAsteroidSector = $sectorService->getOrCreateSector($impactProbe->currentSector);
     $fatalAsteroidSector->addObject($fatalAsteroid);
     $saveSectorFixture($fatalAsteroidSector);
     $fatalAsteroidLaunch = $kernel->handle('POST', '/api/probe/' . $impactProbe->id . '/asteroids/fatal-impact-rock/trajectories', $impactHeaders, json_encode([
@@ -9552,7 +9566,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         'others-impact-rock', 'Others impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
     ))->withDeuteriumEngine();
-    $othersImpactSector = $sectorRepository->load($impactProbe->currentSector);
+    $othersImpactSector = $sectorService->getOrCreateSector($impactProbe->currentSector);
     $othersImpactSector->addObject($othersImpactAsteroid);
     $saveSectorFixture($othersImpactSector);
     $othersImpactLaunch = $kernel->handle(
@@ -9595,7 +9609,7 @@ if ($impactProbe !== null && $impactObserverProbe !== null) {
         'departed-launcher-impact-rock', 'Departed launcher impact rock', 'iron', ['iron'], 'small', 0.000001, 0.001,
         resourceAmounts: ['metals' => 1.0],
     ))->withDeuteriumEngine();
-    $departedLauncherSector = $sectorRepository->load($impactProbe->currentSector);
+    $departedLauncherSector = $sectorService->getOrCreateSector($impactProbe->currentSector);
     $departedLauncherSector->addObject($departedLauncherAsteroid);
     $saveSectorFixture($departedLauncherSector);
     $departedLauncherImpact = $kernel->handle(
@@ -10855,7 +10869,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(202, $assemblyRecall->status, 'recalling an assembling Manny is accepted');
     $test->assertEquals(Manny::TASK_RETURNING, $assemblyRecall->body['manny']['currentTask'] ?? null, 'recalling an assembly task starts a returning task');
     $test->assertEquals(15, count($assemblyRecall->body['manny']['task']['droppedIngredients'] ?? []), 'recalling an assembly task reports all dropped ingredients');
-    $assemblyRecallSector = $sectorRepository->load($assemblyRecallProbe->currentSector);
+    $assemblyRecallSector = $sectorService->getOrCreateSector($assemblyRecallProbe->currentSector);
     foreach ([
         ProbeItem::TYPE_DEUTERIUM_ENGINE => 1,
         ProbeItem::TYPE_SCUT_RELAY => 1,
@@ -10916,7 +10930,7 @@ if ($createdProbe !== null) {
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(0.04, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'completed Manny mining transfers metals to the probe inventory');
     $test->assertEquals('probe', $mannies->findByUidForProbe($createdProbe->id, $secondMannyId)?->locationType, 'completed mining returns the Manny to the probe');
-    $depletedSector = $sectorRepository->load($createdProbe->currentSector);
+    $depletedSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $depletedAsteroid = $depletedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.99, $depletedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'completed Manny mining subtracts the mined metals from the asteroid');
 
@@ -10937,7 +10951,7 @@ if ($createdProbe !== null) {
     $processScheduledMannyNow($mineMannyDbId);
     $processScheduledMannyNow($mineMannyDbId);
     $test->assertEquals(0.08, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'duplicate stale mining refreshes do not deliver regular mining twice');
-    $staleMinedAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('stale-mine-rock');
+    $staleMinedAsteroid = $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById('stale-mine-rock');
     $test->assertEquals(0.96, $staleMinedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'duplicate stale mining refreshes do not deplete regular mining twice');
 
     $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
@@ -10968,7 +10982,7 @@ if ($createdProbe !== null) {
     $processScheduledMannyNow($mineMannyDbId);
     $processScheduledMannyNow($parallelThirdMannyDbId);
     $test->assertEquals(0.16, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'parallel Manny mining deliveries preserve both metal additions');
-    $parallelMetalAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-metal-rock');
+    $parallelMetalAsteroid = $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById('parallel-metal-rock');
     $test->assertEquals(0.12, $parallelMetalAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'parallel Manny mining depletes both metal deliveries');
     $createdProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $createdProbe, ['metals' => 0.08]);
 
@@ -10998,7 +11012,7 @@ if ($createdProbe !== null) {
     $processScheduledMannyNow($mineMannyDbId);
     $processScheduledMannyNow($parallelThirdMannyDbId);
     $test->assertEquals(20.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'parallel Manny mining deliveries preserve both deuterium additions');
-    $parallelDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('parallel-deuterium-rock');
+    $parallelDeuteriumAsteroid = $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById('parallel-deuterium-rock');
     $test->assertEquals(0.0, $parallelDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'parallel Manny mining depletes both deuterium deliveries');
 
     $pdo->prepare('UPDATE neumann_probes SET deuterium_stock = 25 WHERE id = :id')->execute(['id' => $createdProbe->id]);
@@ -11042,7 +11056,7 @@ if ($createdProbe !== null) {
     $processScheduledMannyNow($mineMannyDbId);
     $kernel->handle('GET', '/api/probe/mannies', $headers);
     $test->assertEquals(35.0, $probes->findByPlayerId($player->id)?->deuteriumStock, 'completed two-trip deuterium mining adds the final five tank points only once');
-    $tripDeuteriumAsteroid = $sectorRepository->load($createdProbe->currentSector)->findObjectById('trip-deuterium-rock');
+    $tripDeuteriumAsteroid = $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById('trip-deuterium-rock');
     $test->assertEquals(0.1, $tripDeuteriumAsteroid?->toArray()['resourceAmounts']['deuterium'] ?? null, 'two-trip deuterium mining depletes exactly 0.10 ECE from the asteroid');
 
     $saveSectorFixture(new SectorContent($createdProbe->currentSector, [
@@ -11139,7 +11153,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(0.09, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::METALS), 'completed multi-resource mining transfers the metals share');
     $test->assertEquals(0.01, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::ICE), 'completed multi-resource mining transfers the ice share');
     $test->assertEquals(0.01, probeTestStoredResource($storage, $probes, $player->id, ResourceComposition::CARBON_COMPOUNDS), 'completed multi-resource mining transfers the organic-compound share');
-    $mixedSector = $sectorRepository->load($createdProbe->currentSector);
+    $mixedSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $mixedAsteroid = $mixedSector->getObjects()[0] ?? null;
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['metals'] ?? null, 'multi-resource mining subtracts the metals share from the asteroid');
     $test->assertEquals(0.3233, $mixedAsteroid?->toArray()['resourceAmounts']['ice'] ?? null, 'multi-resource mining subtracts the ice share from the asteroid');
@@ -11279,7 +11293,7 @@ if ($createdProbe !== null) {
     ))[0] ?? null;
     $test->assertEquals(null, $completedBookmarkManny['currentTask'] ?? null, 'completed bookmark installation returns the Manny to idle');
     $test->assertEquals('success', $completedBookmarkManny['task']['result'] ?? null, 'completed bookmark installation records a success result');
-    $bookmarkedSector = $sectorRepository->load($createdProbe->currentSector);
+    $bookmarkedSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $bookmarkedObject = $bookmarkedSector->findObjectById('bookmark-rock');
     $bookmarkedData = $bookmarkedObject?->toArray() ?? [];
     $test->assertEquals('Balise test', $bookmarkedObject?->getName(), 'bookmark installation persists the celestial object name in the sector file');
@@ -11287,7 +11301,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('Remi', $bookmarkedData['waypointBookmarks'][0]['playerName'] ?? null, 'bookmark history stores the player display name');
     $bookmarkObservation = $kernel->handle('GET', '/api/probe/sector', $headers);
     $test->assertEquals('Balise test', $bookmarkObservation->body['sector']['objects'][0]['waypointBookmarks'][0]['name'] ?? null, 'sector observation exposes bookmark history');
-    $bookmarkStats = (new UniverseStatsService($pdo, $universePath))->collect();
+    $bookmarkStats = (new UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($pdo), $universePath))->collect();
     $test->assertEquals(1, $bookmarkStats['metrics']['waypointBookmarksInstalled'] ?? null, 'public stats count installed waypoint bookmarks');
     $topWaypointPlayers = $bookmarkStats['metrics']['topWaypointPlayers'] ?? [];
     $test->assertEquals('Remi', $topWaypointPlayers[0]['playerName'] ?? null, 'public stats waypoint podium ranks players by installed bookmarks');
@@ -11460,7 +11474,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(Manny::LOCATION_SECTOR, $abandonedTimeoutResult?->locationType, 'an unowned timed-out Manny remains in its sector');
     $test->assertEquals(null, $abandonedTimeoutResult?->currentTask, 'an abandoned timed-out Manny has no active task');
     $test->assertEquals('abandoned', $abandonedTimeoutResult?->taskPayload['result'] ?? null, 'storage timeout records the final abandonment result');
-    $abandonedTimeoutSector = $sectorRepository->load($abandonedTimeoutProbe->currentSector);
+    $abandonedTimeoutSector = $sectorService->getOrCreateSector($abandonedTimeoutProbe->currentSector);
     $abandonedTimeoutObject = $abandonedTimeoutSector->findObjectById(SectorManny::objectIdForUid($abandonedTimeoutManny->uid));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $abandonedTimeoutObject?->toArray()['state'] ?? null, 'storage timeout exposes the Manny as an abandoned salvageable sector object');
     $test->assertEquals('done', $abandonedTimeoutEventId !== null ? $scheduledEvents->findById($abandonedTimeoutEventId)?->status : null, 'final Manny abandonment completes its scheduler event');
@@ -11483,7 +11497,7 @@ if ($createdProbe !== null) {
         $test->assertEquals(200, $jettisonSteelBar->status, 'craftable items can be jettisoned into the current sector');
     }
     $driftingObjectId = SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_STEEL_BAR);
-    $driftingSector = $sectorRepository->load($createdProbe->currentSector);
+    $driftingSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $driftingSteelBars = $driftingSector->findObjectById($driftingObjectId);
     $test->assertEquals('drifting_item', $driftingSteelBars?->getType()->value, 'jettisoned craftable items are persisted as a drifting sector object');
     $test->assertEquals(7, $driftingSteelBars?->toArray()['quantity'] ?? null, 'drifting craftable items are aggregated by type in the sector');
@@ -11508,7 +11522,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('off', $jettisonScutRelay->body['jettisoned']['status'] ?? null, 'jettisoned SCUT relay starts switched off');
     $scutJettisonRelayId = (string) ($jettisonScutRelay->body['jettisoned']['objectId'] ?? '');
     $test->assert($scutJettisonRelayId !== '', 'SCUT relay jettison response exposes the sector relay object id');
-    $test->assertEquals(null, $sectorRepository->load($createdProbe->currentSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY)), 'jettisoned SCUT relay is not persisted as a drifting item stack');
+    $test->assertEquals(null, $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById(SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY)), 'jettisoned SCUT relay is not persisted as a drifting item stack');
     $jettisonedRelay = $scutRelays->findById((int) $scutJettisonRelayId);
     $test->assert($jettisonedRelay?->sector->equals($createdProbe->currentSector) === true, 'jettisoned SCUT relay is persisted in the current sector');
     $test->assertEquals('off', $jettisonedRelay?->status, 'jettisoned SCUT relay is persisted as an inactive relay');
@@ -11530,13 +11544,13 @@ if ($createdProbe !== null) {
     $jettisonScutTransitBeacon = $kernel->handle('POST', '/api/probe/inventory/' . rawurlencode($scutTransitBeaconItemId) . '/jettison', $headers, json_encode([], JSON_THROW_ON_ERROR));
     $test->assertEquals(200, $jettisonScutTransitBeacon->status, 'POST /api/probe/inventory/{itemId}/jettison ejects a SCUT transit beacon');
     $test->assertEquals(ProbeItem::TYPE_SCUT_TRANSIT_BEACON, $jettisonScutTransitBeacon->body['jettisoned']['type'] ?? null, 'SCUT transit beacon jettison response exposes the item type');
-    $jettisonedBeacon = $sectorRepository->load($createdProbe->currentSector)->findObjectById(
+    $jettisonedBeacon = $sectorService->getOrCreateSector($createdProbe->currentSector)->findObjectById(
         SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_TRANSIT_BEACON),
     );
     $test->assertEquals('drifting_item', $jettisonedBeacon?->getType()->value, 'jettisoned SCUT transit beacon is persisted as a drifting item');
     $test->assertEquals(1, $jettisonedBeacon?->toArray()['quantity'] ?? null, 'jettisoned SCUT transit beacon remains recoverable in the sector');
 
-    $sectorWithLegacyDriftingRelay = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithLegacyDriftingRelay = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $sectorWithLegacyDriftingRelay->addObject(new SectorDriftingItem(
         SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_SCUT_RELAY),
         ProbeItem::SCUT_RELAY_NAME,
@@ -11554,7 +11568,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(1, count($legacyDriftingRelays), 'current-sector scan can expose legacy drifting SCUT relay item stacks');
     $test->assertEquals(false, $legacyDriftingRelays[0]['salvageable'] ?? null, 'oversized drifting SCUT relay item stacks are not exposed as salvageable');
 
-    $sectorWithDriftingEngine = $sectorRepository->load($createdProbe->currentSector);
+    $sectorWithDriftingEngine = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $sectorWithDriftingEngine->addObject(new SectorDriftingItem(
         SectorDriftingItem::objectIdForItemType(ProbeItem::TYPE_DEUTERIUM_ENGINE),
         ProbeItem::DEUTERIUM_ENGINE_NAME,
@@ -11589,7 +11603,7 @@ if ($createdProbe !== null) {
         static fn(array $item): bool => ($item['type'] ?? null) === ProbeItem::TYPE_STEEL_BAR,
     ));
     $test->assertEquals(5, count($recoveredSteelBars), 'completed drifting-item recovery creates only the Manny cargo capacity worth of items');
-    $driftingSectorAfterRecovery = $sectorRepository->load($createdProbe->currentSector);
+    $driftingSectorAfterRecovery = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $remainingDriftingSteelBars = $driftingSectorAfterRecovery->findObjectById($driftingObjectId);
     $test->assertEquals(2, $remainingDriftingSteelBars?->toArray()['quantity'] ?? null, 'unrecovered drifting item quantity remains in the sector');
     $steelBarSalvageActor = array_values(array_filter(
@@ -11607,7 +11621,7 @@ if ($createdProbe !== null) {
     $test->assertEquals(null, $jettisonedManny?->probeId, 'jettisoned Manny has no owner probe link in the database');
     $test->assertEquals('sector', $jettisonedManny?->locationType, 'jettisoned Manny is moved outside the probe');
     $test->assertEquals(round($beforeMannyJettisonFreeCapacity + 0.05, 4), $jettisonManny->body['inventory']['freeCapacity'] ?? null, 'jettisoning an onboard Manny frees its storage slot');
-    $jettisonedSector = $sectorRepository->load($createdProbe->currentSector);
+    $jettisonedSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $jettisonedSectorManny = $jettisonedSector->findObjectById(SectorManny::objectIdForUid($fourthMannyId));
     $test->assertEquals('manny', $jettisonedSectorManny?->getType()->value, 'jettisoned Manny is registered as a sector object');
     $test->assertEquals(SectorManny::STATE_ABANDONED, $jettisonedSectorManny?->toArray()['state'] ?? null, 'jettisoned sector Manny is marked abandoned');
@@ -11635,7 +11649,7 @@ if ($createdProbe !== null) {
     $recoveredManny = $mannies->findByUidForProbe($createdProbe->id, $fourthMannyId);
     $test->assert($recoveredManny !== null, 'salvaged abandoned Manny is attached to the recovering probe');
     $test->assertEquals('sector', $recoveredManny?->locationType, 'salvaged Manny joins the owner list outside the probe');
-    $sectorAfterSalvage = $sectorRepository->load($createdProbe->currentSector);
+    $sectorAfterSalvage = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $test->assertEquals(null, $sectorAfterSalvage->findObjectById(SectorManny::objectIdForUid($fourthMannyId)), 'salvaged Manny disappears from the sector definition');
     $salvageActor = array_values(array_filter(
         $afterSalvageList->body['mannies'] ?? [],
@@ -11689,7 +11703,7 @@ if ($createdProbe !== null) {
     $test->assertEquals('probe', $dropSalvagedMannyCargo->body['manny']['location']['type'] ?? null, 'salvage actor retries docking after dropping Manny cargo');
     $droppedRecoveredManny = $mannies->findByUid($fourthMannyId);
     $test->assertEquals(null, $droppedRecoveredManny?->probeId, 'dropped salvaged Manny becomes unowned again');
-    $sectorAfterDroppedMannyCargo = $sectorRepository->load($createdProbe->currentSector);
+    $sectorAfterDroppedMannyCargo = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $droppedMannyCargoObject = $sectorAfterDroppedMannyCargo->findObjectById(SectorManny::objectIdForUid($fourthMannyId));
     $test->assertEquals(SectorManny::STATE_ABANDONED, $droppedMannyCargoObject?->toArray()['state'] ?? null, 'dropped salvaged Manny is restored as an abandoned sector object');
 
@@ -11698,7 +11712,7 @@ if ($createdProbe !== null) {
     $raceManny->locationType = 'sector';
     $raceManny->sector = $createdProbe->currentSector;
     $mannies->save($raceManny);
-    $raceSector = $sectorRepository->load($createdProbe->currentSector);
+    $raceSector = $sectorService->getOrCreateSector($createdProbe->currentSector);
     $raceObject = new SectorManny(
         SectorManny::objectIdForUid($raceManny->uid),
         $raceManny->name,
@@ -11859,10 +11873,12 @@ if ($moveProbe !== null) {
     $startedMovementPhaseEvents = $pdo->prepare("SELECT COUNT(*) FROM scheduled_events WHERE status = 'pending' AND type = 'probe.movement.phase' AND entity_type = 'probe_movement' AND entity_id = :movement_id");
     $startedMovementPhaseEvents->execute(['movement_id' => $startedMovement?->id ?? 0]);
     $test->assertEquals(4, (int) $startedMovementPhaseEvents->fetchColumn(), 'starting a movement schedules its phase events');
-    $forgottenSector = $sectorRepository->load($originBeforeMove);
+    $forgottenSector = $sectorService->getOrCreateSector($originBeforeMove);
     $forgottenSectorManny = $forgottenSector->findObjectById(SectorManny::objectIdForUid($firstMannyId));
     $test->assertEquals(SectorManny::STATE_FORGOTTEN, $forgottenSectorManny?->toArray()['state'] ?? null, 'movement registers outside owned Mannys as forgotten sector objects');
     $test->assertEquals($moveProbe->id, $mannies->findByUid($firstMannyId)?->probeId, 'forgotten Manny keeps its owner probe link in the database');
+    $test->assertEquals(true, $mannies->findByUid($firstMannyId)?->isForgotten, 'departure persists the explicit SQL forgotten flag');
+    $test->assertEquals(null, $sectorRepository->load($originBeforeMove)->findObjectById(SectorManny::objectIdForUid($firstMannyId)), 'departure does not write forgotten presence to JSON');
 
     $cancelMove = $kernel->handle('DELETE', '/api/probe/' . $moveProbe->id . '/move', $moveHeaders);
     $test->assertEquals(204, $cancelMove->status, 'DELETE /api/probe/{probeId}/move cancels movement during preparation');
@@ -11876,7 +11892,7 @@ if ($moveProbe !== null) {
     $cancelledMovementPhaseEvents = $pdo->prepare("SELECT COUNT(*) FROM scheduled_events WHERE status = 'cancelled' AND type = 'probe.movement.phase' AND entity_type = 'probe_movement' AND entity_id = :movement_id");
     $cancelledMovementPhaseEvents->execute(['movement_id' => $startedMovement?->id ?? 0]);
     $test->assertEquals(4, (int) $cancelledMovementPhaseEvents->fetchColumn(), 'movement cancellation cancels scheduled phase events');
-    $sectorAfterCancellation = $sectorRepository->load($originBeforeMove);
+    $sectorAfterCancellation = $sectorService->getOrCreateSector($originBeforeMove);
     $test->assertEquals(null, $sectorAfterCancellation->findObjectById(SectorManny::objectIdForUid($firstMannyId)), 'movement cancellation removes synthetic forgotten Manny objects');
 
     $secondCancellation = $kernel->handle('DELETE', '/api/probe/' . $moveProbe->id . '/move', $moveHeaders);
@@ -12001,7 +12017,7 @@ if ($moveProbe !== null) {
                 $returnedManny = $mannies->findByUidForProbe($moveProbe->id, $firstMannyId);
                 $test->assertEquals('probe', $returnedManny?->locationType, 'returning to a forgotten Manny sector brings the owned idle Manny back aboard');
                 $test->assertEquals(null, $returnedManny?->sector, 'recovered forgotten Manny no longer exposes an exterior sector position');
-                $revisitedForgottenSector = $sectorRepository->load($originBeforeMove);
+                $revisitedForgottenSector = $sectorService->getOrCreateSector($originBeforeMove);
                 $test->assertEquals(null, $revisitedForgottenSector->findObjectById(SectorManny::objectIdForUid($firstMannyId)), 'recovered forgotten Manny is removed from the sector object list');
             }
         }
@@ -12402,7 +12418,7 @@ if ($secondaryLossDefaultProbe !== null) {
         $test->assertEquals(null, $abandonedOutsideManny?->probeId, 'destroyed secondary probe detaches outside Mannys from the deleted probe');
         $test->assertEquals(Manny::LOCATION_SECTOR, $abandonedOutsideManny?->locationType, 'destroyed secondary probe leaves outside Mannys in their sector');
         $test->assertEquals(null, $abandonedOutsideManny?->currentTask, 'destroyed secondary probe clears abandoned Manny tasks');
-        $secondaryLossSector = $sectorRepository->load($secondaryLossDefaultProbe->currentSector);
+        $secondaryLossSector = $sectorService->getOrCreateSector($secondaryLossDefaultProbe->currentSector);
         $secondaryLossSectorManny = $secondaryLossSector->findObjectById(SectorManny::objectIdForUid($secondaryLossOutsideManny->uid));
         $test->assertEquals(SectorManny::STATE_ABANDONED, $secondaryLossSectorManny?->toArray()['state'] ?? null, 'destroyed secondary probe marks outside Mannys as abandoned sector objects');
 

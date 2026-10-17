@@ -27,7 +27,7 @@ final class SculptDuckAsteroidTaskHandler implements TaskHandlerInterface
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
         private readonly \Closure $saveManny,
-        private readonly \Closure $saveSector,
+        private readonly \Closure $changeMineables,
         private readonly \Closure $clearTask,
         private readonly \Closure $registerMannyInSector,
         private readonly \Closure $findMannyById,
@@ -86,47 +86,47 @@ final class SculptDuckAsteroidTaskHandler implements TaskHandlerInterface
             return $manny;
         }
 
-        $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
         $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
-        $target = $sector->findObjectById($objectId);
-        $result = [
-            'lastTask' => Manny::TASK_SCULPTING_DUCK_ASTEROID,
-            'objectId' => $objectId,
-            'target' => $manny->taskPayload['target'] ?? null,
-        ];
-        $sculpted = false;
-        if (!$target instanceof Asteroid) {
-            $result += ['result' => 'failed', 'failureReason' => 'target_unavailable'];
-        } elseif ($target->isDuckShaped()) {
-            $result += ['result' => 'already_completed', 'asteroid' => $target->toArray()];
-            $sculpted = true;
-        } else {
-            $target = $target->sculptedInTheShapeOfADuck();
-            if (!$sector->replaceObject($target)) {
-                throw new \RuntimeException('Asteroid replacement failed during anatiform sculpting.');
-            }
-            ($this->saveSector)($sector);
-            $result += ['result' => 'success', 'asteroid' => $target->toArray()];
-            $sculpted = true;
-        }
-
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        if ($sculpted) {
-            $returnDurationSeconds = ($this->miningTravelSeconds)();
-            $manny->currentTask = Manny::TASK_RETURNING;
-            $manny->taskStartedAt = $now->format('c');
-            $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
-            $manny->taskPayload = $result + [
-                'reason' => 'duck_asteroid_sculpting_completed',
-                'durationSeconds' => $returnDurationSeconds,
+        return ($this->changeMineables)($manny->sector ?? $probe->currentSector, [$objectId], function (\VonNeumannGame\Sector\SectorContent $sector) use ($manny, $probe, $now, $objectId): Manny {
+            $target = $sector->findObjectById($objectId);
+            $result = [
+                'lastTask' => Manny::TASK_SCULPTING_DUCK_ASTEROID,
+                'objectId' => $objectId,
+                'target' => $manny->taskPayload['target'] ?? null,
             ];
-            ($this->removeMannyFromSector)($manny);
-        } else {
-            ($this->clearTask)($manny, $result);
-            ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
-        }
-        ($this->saveManny)($manny);
+            $sculpted = false;
+            if (!$target instanceof Asteroid) {
+                $result += ['result' => 'failed', 'failureReason' => 'target_unavailable'];
+            } elseif ($target->isDuckShaped()) {
+                $result += ['result' => 'already_completed', 'asteroid' => $target->toArray()];
+                $sculpted = true;
+            } else {
+                $target = $target->sculptedInTheShapeOfADuck();
+                if (!$sector->replaceObject($target)) {
+                    throw new \RuntimeException('Asteroid replacement failed during anatiform sculpting.');
+                }
+                $result += ['result' => 'success', 'asteroid' => $target->toArray()];
+                $sculpted = true;
+            }
 
-        return ($this->findMannyById)($manny->id) ?? $manny;
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            if ($sculpted) {
+                $returnDurationSeconds = ($this->miningTravelSeconds)();
+                $manny->currentTask = Manny::TASK_RETURNING;
+                $manny->taskStartedAt = $now->format('c');
+                $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
+                $manny->taskPayload = $result + [
+                    'reason' => 'duck_asteroid_sculpting_completed',
+                    'durationSeconds' => $returnDurationSeconds,
+                ];
+                ($this->removeMannyFromSector)($manny);
+            } else {
+                ($this->clearTask)($manny, $result);
+                ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
+            }
+            ($this->saveManny)($manny);
+
+            return ($this->findMannyById)($manny->id) ?? $manny;
+        });
     }
 }

@@ -27,6 +27,20 @@ final class SectorEffectService
         $this->events->cancelPending('sector.effect', 'sector_effect', $id);
     }
 
+    /** A committed publication remains recoverable after a failed filesystem attempt. */
+    public function applyScheduled(\VonNeumannGame\Domain\ScheduledEvent $event): bool
+    {
+        try {
+            $this->apply($event->entityId);
+            return true;
+        } catch (\Throwable $error) {
+            // apply() persists attempts and last_error. Never repeat the business
+            // mutation; release just this publication for the independent worker.
+            $this->events->release($event, gmdate('c', time() + 5), $event->payload);
+            return false;
+        }
+    }
+
     public function apply(int $id): void
     {
         if ($this->effects->inTransaction()) { throw new \LogicException('Project only committed sector intentions.'); }

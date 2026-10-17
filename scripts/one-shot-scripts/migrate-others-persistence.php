@@ -18,7 +18,7 @@ foreach (array_slice($argv, 1) as $argument) {
 }
 try {
     $pdo = (new \VonNeumannGame\AppFactory($root))->pdo($config, initializeSchema: false);
-    $sectors = new \VonNeumannGame\Sector\SectorService(new \VonNeumannGame\Sector\SectorFileRepository(str_starts_with($universe, '/') ? $universe : $root . '/' . $universe), new \VonNeumannGame\Sector\SectorContentGenerator(), 'migration');
+    $sectors = new \VonNeumannGame\Sector\SectorService(new \VonNeumannGame\Sector\SectorFileRepository(str_starts_with($universe, '/') ? $universe : $root . '/' . $universe), new \VonNeumannGame\Sector\SectorContentGenerator(), 'migration', pdo: $pdo);
     $result = (new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($pdo, $sectors))->run($apply);
     echo json_encode($result, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR), PHP_EOL;
 } catch (Throwable $error) { fwrite(STDERR, $error->getMessage() . "\n"); exit(1); }

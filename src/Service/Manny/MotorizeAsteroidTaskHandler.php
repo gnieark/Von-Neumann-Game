@@ -31,11 +31,11 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
         private readonly \Closure $releaseMannyFromStorage,
         private readonly \Closure $removeMannyFromSector,
         private readonly \Closure $saveManny,
-        private readonly \Closure $saveSector,
+        private readonly \Closure $changeMineables,
         private readonly \Closure $clearTask,
         private readonly \Closure $registerMannyInSector,
         private readonly \Closure $findMannyById,
-        private readonly \Closure $replaceObjectIdReferences,
+        private readonly \Closure $replaceStockIdentity,
     ) {}
 
     public function supports(?string $task): bool
@@ -118,51 +118,51 @@ final class MotorizeAsteroidTaskHandler implements TaskHandlerInterface
             return $manny;
         }
 
-        $sector = ($this->getOrCreateSector)($manny->sector ?? $probe->currentSector);
         $objectId = (string) ($manny->taskPayload['objectId'] ?? '');
-        $target = $sector->findObjectById($objectId);
-        $result = [
-            'lastTask' => Manny::TASK_MOTORIZING_ASTEROID,
-            'objectId' => $objectId,
-            'target' => $manny->taskPayload['target'] ?? null,
-        ];
-        $installed = false;
-        if (!$target instanceof Asteroid) {
-            $result += ['result' => 'failed', 'failureReason' => 'target_unavailable'];
-        } elseif ($target->isMotorized()) {
-            $result += ['result' => 'failed', 'failureReason' => 'asteroid_already_motorized'];
-        } else {
-            $newObjectId = 'mtr_' . bin2hex(random_bytes(12));
-            $motorized = $target->withDeuteriumEngine($newObjectId);
-            if (!$sector->replaceObjectAndReferences($objectId, $motorized)) {
-                throw new \RuntimeException('Asteroid replacement failed during motorization.');
-            }
-            ($this->replaceObjectIdReferences)($objectId, $newObjectId);
-            ($this->saveSector)($sector);
-            $result['result'] = 'success';
-            $result['previousObjectId'] = $objectId;
-            $result['objectId'] = $newObjectId;
-            $result['asteroid'] = $motorized->toArray();
-            $installed = true;
-        }
-
-        $manny->locationType = Manny::LOCATION_SECTOR;
-        if ($installed) {
-            $returnDurationSeconds = ($this->miningTravelSeconds)();
-            $manny->currentTask = Manny::TASK_RETURNING;
-            $manny->taskStartedAt = $now->format('c');
-            $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
-            $manny->taskPayload = $result + [
-                'reason' => 'asteroid_motorization_completed',
-                'durationSeconds' => $returnDurationSeconds,
+        return ($this->changeMineables)($manny->sector ?? $probe->currentSector, [$objectId], function (\VonNeumannGame\Sector\SectorContent $sector) use ($manny, $probe, $now, $objectId): Manny {
+            $target = $sector->findObjectById($objectId);
+            $result = [
+                'lastTask' => Manny::TASK_MOTORIZING_ASTEROID,
+                'objectId' => $objectId,
+                'target' => $manny->taskPayload['target'] ?? null,
             ];
-            ($this->removeMannyFromSector)($manny);
-        } else {
-            ($this->clearTask)($manny, $result);
-            ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
-        }
-        ($this->saveManny)($manny);
+            $installed = false;
+            if (!$target instanceof Asteroid) {
+                $result += ['result' => 'failed', 'failureReason' => 'target_unavailable'];
+            } elseif ($target->isMotorized()) {
+                $result += ['result' => 'failed', 'failureReason' => 'asteroid_already_motorized'];
+            } else {
+                $newObjectId = 'mtr_' . bin2hex(random_bytes(12));
+                $newObjectId = ($this->replaceStockIdentity)('motorization-' . $manny->taskScheduledEventId, $objectId, $newObjectId);
+                $motorized = $target->withDeuteriumEngine($newObjectId);
+                if (!$sector->replaceObjectAndReferences($objectId, $motorized)) {
+                    throw new \RuntimeException('Asteroid replacement failed during motorization.');
+                }
+                $result['result'] = 'success';
+                $result['previousObjectId'] = $objectId;
+                $result['objectId'] = $newObjectId;
+                $result['asteroid'] = $motorized->toArray();
+                $installed = true;
+            }
 
-        return ($this->findMannyById)($manny->id) ?? $manny;
+            $manny->locationType = Manny::LOCATION_SECTOR;
+            if ($installed) {
+                $returnDurationSeconds = ($this->miningTravelSeconds)();
+                $manny->currentTask = Manny::TASK_RETURNING;
+                $manny->taskStartedAt = $now->format('c');
+                $manny->taskEndsAt = $now->modify('+' . $returnDurationSeconds . ' seconds')->format('c');
+                $manny->taskPayload = $result + [
+                    'reason' => 'asteroid_motorization_completed',
+                    'durationSeconds' => $returnDurationSeconds,
+                ];
+                ($this->removeMannyFromSector)($manny);
+            } else {
+                ($this->clearTask)($manny, $result);
+                ($this->registerMannyInSector)($manny, SectorManny::STATE_FORGOTTEN);
+            }
+            ($this->saveManny)($manny);
+
+            return ($this->findMannyById)($manny->id) ?? $manny;
+        });
     }
 }

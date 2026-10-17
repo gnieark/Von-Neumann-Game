@@ -18,6 +18,14 @@ final class StorageContainerRepository
         private readonly array $config = [],
     ) {}
 
+    public function lockForMannyPlacement(int $probeId): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Placement requires a transaction.'); }
+        $statement = $this->pdo->prepare('SELECT id FROM storage_containers WHERE probe_id = ? ORDER BY id' . ($this->pdo->getAttribute(\PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : ''));
+        $statement->execute([$probeId]);
+        $statement->fetchAll();
+    }
+
     public function ensureCoreContainer(NeumannProbe $probe): StorageContainer
     {
         $existing = $this->findByUidForProbe($probe->id, StorageContainer::CORE_UID);

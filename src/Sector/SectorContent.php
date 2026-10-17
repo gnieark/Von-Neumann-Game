@@ -7,6 +7,9 @@ namespace VonNeumannGame\Sector;
 final class SectorContent
 {
     private array $sqlDepots = [];
+    private array $sqlForgottenMannies = [];
+
+    public function hydrateForgottenMannies(array $mannies): void { $this->sqlForgottenMannies = $mannies; }
     private ?string $persistedRevision = null;
     private array $appliedEffects = [];
 
@@ -81,7 +84,7 @@ final class SectorContent
      */
     public function getObjects(): array
     {
-        return [...$this->objects, ...$this->detachedContainers, ...$this->sqlDepots];
+        return [...$this->objects, ...$this->detachedContainers, ...$this->sqlDepots, ...$this->sqlForgottenMannies];
     }
 
     /**
@@ -133,7 +136,7 @@ final class SectorContent
 
     public function findObjectById(string $id): ?UniverseObject
     {
-        foreach ([...$this->detachedContainers, ...$this->sqlDepots] as $container) {
+        foreach ([...$this->detachedContainers, ...$this->sqlDepots, ...$this->sqlForgottenMannies] as $container) {
             if ($container->getId() === $id) {
                 return $container;
             }
@@ -174,6 +177,9 @@ final class SectorContent
 
     public function addObject(UniverseObject $object): void
     {
+        if ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_FORGOTTEN) {
+            throw new \LogicException('Forgotten Manny presence is SQL-only.');
+        }
         if ($object instanceof SectorGerminationDepot) {
             $this->sqlDepots[$object->getId()] = $object;
             return;
@@ -218,6 +224,16 @@ final class SectorContent
             $this->addDetachedContainerToCanonicalCollection($container);
         }
         $this->detachedContainerChanges = [];
+    }
+
+    /** Replace the attached SQL projections read before a source lock was acquired. */
+    public function hydrateContainersForTargets(array $targetIds, array $containers): void
+    {
+        $others = array_filter(
+            [...$this->detachedContainers, ...$this->hiddenDetachedContainers, ...$this->planetDroppedContainers],
+            static fn(SectorDetachedContainer $container): bool => !in_array($container->getTargetObjectId(), $targetIds, true),
+        );
+        $this->hydrateDetachedContainers([...$others, ...$containers]);
     }
 
     /**
@@ -540,6 +556,39 @@ final class SectorContent
     public function getSource(): string
     {
         return $this->source;
+    }
+
+    public function toDescriptor(): array
+    {
+        $data = MineableDescriptors::descriptor($this->toArray());
+        unset($data['detachedContainers'], $data['hiddenDetachedContainers'], $data['planetDroppedContainers']);
+        return $data;
+    }
+
+    public static function fromDescriptor(array $data, string $source = 'loaded'): self
+    {
+        return self::fromArray(MineableDescriptors::decode($data), $source);
+    }
+
+    /** Transform the stored object tree without changing timestamps or SQL projections. */
+    public function mapMineables(callable $transform): void
+    {
+        $this->objects = array_map(
+            static fn(UniverseObject $object): UniverseObject => UniverseObject::fromArray(MineableDescriptors::map($object->toArray(), $transform)),
+            $this->objects,
+        );
+    }
+
+    public function mineableIds(): array
+    {
+        $ids = [];
+        foreach ($this->objects as $object) {
+            MineableDescriptors::map($object->toArray(), static function (array $data) use (&$ids): array {
+                $ids[] = $data['id'];
+                return $data;
+            });
+        }
+        return $ids;
     }
 
     public function toArray(): array

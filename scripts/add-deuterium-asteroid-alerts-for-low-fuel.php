@@ -33,7 +33,7 @@ try {
     $generator = new SectorContentGenerator($factory->universeConfig());
     $worldSeed = (string) ($appConfig['worldSeed'] ?? 'default-world');
     $rows = lowFuelAsteroidsRows($pdo, $options['threshold']);
-    [$eligibleRows, $skippedRows] = lowFuelAsteroidsRowsWithoutDeuteriumAsteroid($rows, $sectorRepository, $generator, $worldSeed);
+    [$eligibleRows, $skippedRows] = lowFuelAsteroidsRowsWithoutDeuteriumAsteroid($rows, $sectorRepository, $generator, $worldSeed, new \VonNeumannGame\Sector\SectorService($sectorRepository, $generator, $worldSeed, $pdo));
     $script = __DIR__ . '/add-deuterium-asteroid-alert.php';
     $successes = 0;
     $failures = 0;
@@ -191,6 +191,7 @@ function lowFuelAsteroidsRowsWithoutDeuteriumAsteroid(
     SectorFileRepository $sectorRepository,
     SectorContentGenerator $generator,
     string $worldSeed,
+    \VonNeumannGame\Sector\SectorService $sectors,
 ): array {
     $eligibleRows = [];
     $skippedRows = [];
@@ -200,6 +201,7 @@ function lowFuelAsteroidsRowsWithoutDeuteriumAsteroid(
         $sector = $sectorRepository->exists($coordinates)
             ? $sectorRepository->load($coordinates)
             : $generator->generate($coordinates, $worldSeed, []);
+        if ($sectorRepository->exists($coordinates)) { $sectors->hydrateStocks($sector); }
         if (lowFuelAsteroidsSectorHasDeuteriumAsteroid($sector)) {
             $skippedRows[] = $row;
             continue;

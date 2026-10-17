@@ -43,10 +43,12 @@ try {
     $worldSeed = (string) ($appConfig['worldSeed'] ?? 'default-world');
 
     [$player, $probe] = deuteriumAsteroidResolvePlayerAndProbe($pdo, $probes, $options['username']);
+    $sectors = new \VonNeumannGame\Sector\SectorService($sectorRepository, $generator, $worldSeed, $pdo);
     $sectorExisted = $sectorRepository->exists($probe->currentSector);
     $sector = $sectorExisted
         ? $sectorRepository->load($probe->currentSector)
         : $generator->generate($probe->currentSector, $worldSeed, []);
+    if ($sectorExisted) { $sectors->hydrateStocks($sector); }
     $relative = (new PlayerReferenceFrame($player->homeSector))->globalToRelative($probe->currentSector);
 
     if (deuteriumAsteroidSectorHasDeuteriumAsteroid($sector)) {
@@ -89,8 +91,9 @@ try {
         exit(0);
     }
 
-    $sector->addObject($asteroid);
-    $sectorRepository->save($sector);
+    $sectors->getOrCreateSector($probe->currentSector);
+    $asteroid = $sectors->createMineable($probe->currentSector, 'admin-asteroid-' . $objectId, $asteroid);
+    $objectId = $asteroid->getId();
 
     $movementId = deuteriumAsteroidEnsureMovementId($pdo, $probe);
     $alert = $alerts->createSectorObjectDetectedAlert(

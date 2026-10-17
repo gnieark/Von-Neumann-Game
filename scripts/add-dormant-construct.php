@@ -37,6 +37,11 @@ try {
         ? $repository->load($coordinates)
         : (new SectorContentGenerator($factory->universeConfig()))->generate($coordinates, $worldSeed, []);
 
+    $sectors = null;
+    if (!$options['dryRun']) {
+        $sectors = new \VonNeumannGame\Sector\SectorService($repository, new SectorContentGenerator($factory->universeConfig()), $worldSeed, $factory->pdo($options['databaseConfig']));
+        $sector = $sectors->getOrCreateSector($coordinates);
+    }
     $existing = addDormantConstructExistingObject($sector);
     $objectId = $options['id'] ?? DormantConstruct::objectIdForSector($coordinates, $worldSeed);
     $construct = addDormantConstructCreate($objectId, $options['type'], $options['sourceShipId']);
@@ -45,7 +50,9 @@ try {
         $sector->addObject($construct);
         $action = 'added';
         if (!$options['dryRun']) {
-            $repository->save($sector);
+            if ($construct->getSubtype() === DormantConstruct::SUBTYPE_OTHERS_MOTHERSHIP_WRECK) {
+                $construct = $sectors->createMineable($coordinates, 'admin-construct-' . $construct->getId(), $construct);
+            } else { $sectors->saveSector($sector); }
         }
     }
     $reportedConstruct = $existing ?? $construct;
@@ -72,6 +79,7 @@ try {
 function addDormantConstructParseArguments(array $argv): array
 {
     $options = [
+        'databaseConfig' => null,
         'x' => 0,
         'y' => 0,
         'z' => 0,
@@ -86,6 +94,10 @@ function addDormantConstructParseArguments(array $argv): array
     $coordinates = [];
 
     foreach (array_slice($argv, 1) as $argument) {
+        if (str_starts_with($argument, '--database-config=')) {
+            $options['databaseConfig'] = substr($argument, strlen('--database-config='));
+            continue;
+        }
         if ($argument === '--help' || $argument === '-h') {
             $options['help'] = true;
             continue;
@@ -155,6 +167,7 @@ Usage:
   php scripts/add-dormant-construct.php --sector=<x,y,z>
 
 Options:
+  --database-config=<path>  Use the SQL database matching the universe.
   --id=<id>                Object id. Default is opaque and stable for the sector.
   --type=<type>            Force the structure type instead of choosing it on inspection.
   --source-ship-id=<id>    Stable Others ship id (required only for relativistic_path_clearing).

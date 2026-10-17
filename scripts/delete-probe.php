@@ -70,6 +70,7 @@ function deleteProbeRun(array $argv): int
         new SectorFileRepository(deleteProbeAbsolutePath($root, (string) ($appConfig['universePath'] ?? 'data/universe'))),
         new SectorContentGenerator($universeConfig),
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
+        pdo: $pdo,
     );
     $reinstantiation = new ProbeReinstantiationService(
         new \VonNeumannGame\Repository\ProbeReinstantiationRepository($pdo),

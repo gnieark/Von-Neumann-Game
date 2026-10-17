@@ -1,5 +1,6 @@
 ---
 openapi: 3.0.3
+# Internal SQL stock lifecycle/forgotten-Manny migration: public representations and API v148 are unchanged.
 info:
   title: Von Neumann Game — Others API
   version: '148'

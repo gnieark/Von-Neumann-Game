@@ -50,7 +50,7 @@ $test->assertEquals($waitingSince, $resumeManny->taskPayload[Manny::WAITING_FOR_
 $publicMining = $mannyService->publicArray($resumeProbe, $resumeManny);
 $test->assertEquals($waitingSince, $publicMining['task']['waitingForSpaceSince'] ?? null, 'mining API payload exposes its storage wait timestamp');
 $test->assert(!isset($publicMining['task'][Manny::TASK_SCHEDULED_RUN_AT_PAYLOAD_KEY]), 'storage wait does not expose the internal scheduler timestamp');
-$test->assertEquals(1.0, $sectorRepository->load($resumeProbe->currentSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'waiting mining has not depleted its source');
+$test->assertEquals(1.0, $sectorService->getOrCreateSector($resumeProbe->currentSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'waiting mining has not depleted its source');
 $resumeProbe = setProbeTestStoredResources($storage, $storageContainers, $probes, $resumeProbe, ['metals' => 0.2]);
 $resumeEventId = $resumeManny->taskScheduledEventId;
 $processScheduledMannyNow($resumeManny->id);
@@ -58,7 +58,7 @@ $resumeManny = $mannies->findById($resumeManny->id);
 $test->assertEquals(null, $resumeManny->currentTask, 'mining completes when space is freed before timeout');
 $test->assertEquals(Manny::LOCATION_PROBE, $resumeManny->locationType, 'successful delayed mining returns its Manny');
 $test->assertEquals(0.4, $storage->resourceStock($resumeProbe, ResourceComposition::METALS), 'resumed mining delivers its resources once');
-$test->assertEquals(0.8, $sectorRepository->load($resumeProbe->currentSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'resumed mining depletes only its requested amount');
+$test->assertEquals(0.8, $sectorService->getOrCreateSector($resumeProbe->currentSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'resumed mining depletes only its requested amount');
 $test->assertEquals('done', $scheduledEvents->findById($resumeEventId)->status, 'resumed mining completes its scheduler event');
 $test->assert(!isset($resumeManny->taskPayload[Manny::WAITING_FOR_SPACE_SINCE_PAYLOAD_KEY]), 'completed mining clears its wait timestamp');
 
@@ -80,7 +80,7 @@ foreach (['docks' => 0.5, 'abandoned' => 0.55, 'remote' => 0.5] as $outcome => $
     $test->assertEquals('mining', $expired->taskPayload['lastTask'] ?? null, 'expired mining records the canceled task type');
     $test->assertEquals('done', $scheduledEvents->findById($timeoutEventId)->status, 'expired mining completes its scheduler event');
     $test->assertEquals($stock, $storage->resourceStock($timeoutProbe, ResourceComposition::METALS), 'expired mining does not credit undelivered resources');
-    $test->assertEquals(1.0, $sectorRepository->load($miningSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'expired mining does not deplete unextracted resources');
+    $test->assertEquals(1.0, $sectorService->getOrCreateSector($miningSector)->findObjectById('timeout-rock')->getResourceAmounts()['metals'], 'expired mining does not deplete unextracted resources');
     if ($outcome === 'docks') {
         $test->assertEquals(Manny::LOCATION_PROBE, $expired->locationType, 'timed-out miner docks when its own slot is available');
         $test->assertEquals($timeoutProbe->id, $expired->probeId, 'docked miner keeps its probe');
@@ -88,7 +88,7 @@ foreach (['docks' => 0.5, 'abandoned' => 0.55, 'remote' => 0.5] as $outcome => $
     } else {
         $test->assertEquals(null, $expired->probeId, 'miner without a local docking slot becomes unowned');
         $test->assertEquals($miningSector->toArray(), $expired->sector?->toArray(), 'abandoned miner stays in its mining sector');
-        $test->assertEquals(SectorManny::STATE_ABANDONED, $sectorRepository->load($miningSector)->findObjectById(SectorManny::objectIdForUid($expired->uid))?->toArray()['state'] ?? null, 'expired miner becomes a recoverable abandoned sector object');
+        $test->assertEquals(SectorManny::STATE_ABANDONED, $sectorService->getOrCreateSector($miningSector)->findObjectById(SectorManny::objectIdForUid($expired->uid))?->toArray()['state'] ?? null, 'expired miner becomes a recoverable abandoned sector object');
     }
     $mannyService->refreshMannyState($expired, $timeoutProbe);
     $test->assertEquals($stock, $storage->resourceStock($timeoutProbe, ResourceComposition::METALS), 'replaying an expired mining refresh cannot deliver resources');

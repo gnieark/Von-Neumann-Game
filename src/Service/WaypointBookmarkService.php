@@ -22,17 +22,12 @@ final class WaypointBookmarkService
 
     public function deploy(NeumannProbe $probe, Player $player, string $itemUid, string $objectId, string $name): UniverseObject
     {
-        $item = $this->requiredBookmarkItem($probe, $itemUid);
-        $updatedObject = $this->deployForPlayer(
-            $probe,
-            $player->id,
-            $player->displayName ?? $player->username,
-            $objectId,
-            $name,
-        );
-        $this->items->delete($item);
-
-        return $updatedObject;
+        return $this->sectors->changeMineablesAfterCommit($probe->currentSector, [$objectId], function ($sector) use ($probe, $player, $itemUid, $objectId, $name): UniverseObject {
+            $item = $this->requiredBookmarkItem($probe, $itemUid);
+            $updated = $this->applyBookmark($sector, $player->id, $player->displayName ?? $player->username, $objectId, $name);
+            $this->items->delete($item);
+            return $updated;
+        });
     }
 
     public function requiredBookmarkItem(NeumannProbe $probe, string $itemUid): ProbeItem
@@ -61,13 +56,20 @@ final class WaypointBookmarkService
 
     public function deployForPlayer(NeumannProbe $probe, int $playerId, string $playerName, string $objectId, string $name, ?SectorCoordinates $sectorCoordinates = null): UniverseObject
     {
+        return $this->sectors->changeMineablesAfterCommit($sectorCoordinates ?? $probe->currentSector, [$objectId],
+            fn($sector): UniverseObject => $this->applyBookmark($sector, $playerId, $playerName, $objectId, $name));
+    }
+
+    private function applyBookmark(\VonNeumannGame\Sector\SectorContent $sector, int $playerId, string $playerName, string $objectId, string $name): UniverseObject
+    {
         $name = trim($name);
         if ($name === '' || strlen($name) > 80) {
             throw new MannyActionException(400, 'bad_request', 'Waypoint bookmark name must contain 1 to 80 characters.');
         }
 
-        $sector = $this->sectors->getOrCreateSector($sectorCoordinates ?? $probe->currentSector);
-        $target = $this->deployableTarget($probe, $objectId, $sector->getCoordinates());
+        $target = $sector->findObjectById($objectId);
+        if ($target === null) { throw new MannyActionException(404, 'bookmark_target_not_found', 'Target object not found in the current sector.'); }
+        if ($target instanceof SectorManny) { throw new MannyActionException(422, 'invalid_bookmark_target', 'A waypoint bookmark can only be placed on a celestial object.'); }
         $bookmark = [
             'name' => $name,
             'playerId' => $playerId,
@@ -78,8 +80,6 @@ final class WaypointBookmarkService
         if (!$sector->replaceObject($updatedObject)) {
             throw new \RuntimeException('Unable to update bookmark target.');
         }
-
-        $this->sectors->saveSector($sector);
 
         return $updatedObject;
     }

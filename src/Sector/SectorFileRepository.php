@@ -66,7 +66,7 @@ final class SectorFileRepository
             throw SectorStorageException::legacyDetachedContainerData($path, $legacyReferences);
         }
 
-        $sector = SectorContent::fromArray($data, 'loaded');
+        $sector = SectorContent::fromDescriptor($data, 'loaded');
         $sector->markPersisted(hash('sha256', $json));
         return $sector;
     }
@@ -81,6 +81,23 @@ final class SectorFileRepository
         $this->withLock($coordinates, function () use ($coordinates, $delta): void {
             $sector = $this->load($coordinates);
             $delta($sector);
+            $this->saveLocked($sector);
+        });
+    }
+
+    /** Creation and its replay marker are one atomic file publication. */
+    public function publishCreation(SectorCoordinates $coordinates, string $operation, array $descriptor): void
+    {
+        $this->withLock($coordinates, function () use ($coordinates, $operation, $descriptor): void {
+            if ($this->exists($coordinates)) {
+                if (!$this->load($coordinates)->hasAppliedEffect($operation)) {
+                    throw new SectorStorageException('Sector creation conflicts with an existing file.');
+                }
+                return;
+            }
+            $sector = SectorContent::fromDescriptor($descriptor, 'generated');
+            if (!$sector->getCoordinates()->equals($coordinates)) { throw new SectorStorageException('Sector creation coordinates mismatch.'); }
+            $sector->markEffectApplied($operation);
             $this->saveLocked($sector);
         });
     }
@@ -116,7 +133,7 @@ final class SectorFileRepository
         if ($revision !== $sector->persistedRevision()) {
             throw new SectorStorageException('Sector changed concurrently; reload before applying the operation.');
         }
-        $data = $sector->toArray();
+        $data = $sector->toDescriptor();
         unset(
             $data['detachedContainers'],
             $data['hiddenDetachedContainers'],

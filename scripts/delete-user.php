@@ -68,6 +68,7 @@ function run(array $argv): int
         new SectorFileRepository($universePath),
         new SectorContentGenerator($universeConfig),
         (string) ($appConfig['worldSeed'] ?? 'default-world'),
+        pdo: $pdo,
     );
 
     $deleter = new AccountDeletionService(

@@ -124,6 +124,6 @@ use VonNeumannGame\Sector\SectorCoordinates;
     $test->assertEquals(202, $post($path . '/detach-storage-container', $detach, $headers)->status, 'new cache can be placed on an exhausted wreck');
     $finish($uid);
     $expectedHidden = (int) $pdo->query("SELECT COUNT(*) FROM detached_storage_containers WHERE mode IN ('hidden_on_asteroid', 'hidden_on_dormant_construct')")->fetchColumn();
-    $stats = (new \VonNeumannGame\Service\UniverseStatsService($pdo, $universePath))->collect();
+    $stats = (new \VonNeumannGame\Service\UniverseStatsService(new \VonNeumannGame\Repository\UniverseStatsRepository($pdo), $universePath))->collect();
     $test->assertEquals($expectedHidden, $stats['metrics']['hiddenContainers'], 'statistics sum asteroid and dormant caches');
 })();

@@ -11,11 +11,11 @@ final class SectorEffect
     {
         if ($sector->hasAppliedEffect($operation)) { return; }
         if ($type === 'add_object') {
-            if ($sector->findObjectById($objectId) === null) { $sector->addObject(UniverseObject::fromArray($payload)); }
+            if ($sector->findObjectById($objectId) === null) { $sector->addObject(UniverseObject::fromDescriptor($payload)); }
         } elseif ($type === 'consume_object') {
             $sector->removeObjectById($objectId);
         } elseif ($type === 'patch_objects') {
-            $objects = array_column($sector->toArray()['objects'], null, 'id');
+            $objects = array_column($sector->toDescriptor()['objects'], null, 'id');
             foreach ($payload['changes'] as $change) {
                 if (($objects[$change['id']] ?? null) != $change['before']) {
                     throw new SectorStorageException('Sector object changed outside its durable operation; refusing to overwrite it: ' . $change['id']);
@@ -24,7 +24,7 @@ final class SectorEffect
             foreach ($payload['changes'] as $change) {
                 if ($change['after'] === null) { $sector->removeObjectById($change['id']); }
                 else {
-                    $object = UniverseObject::fromArray($change['after']);
+                    $object = UniverseObject::fromDescriptor($change['after']);
                     if ($change['before'] === null) { $sector->addObject($object); }
                     elseif (!$sector->replaceObject($object)) { throw new SectorStorageException('Sector object disappeared during projection.'); }
                 }

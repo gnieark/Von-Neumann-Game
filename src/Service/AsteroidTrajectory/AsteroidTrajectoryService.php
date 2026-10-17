@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Service\AsteroidTrajectory;
 
-use PDOException;
 use VonNeumannGame\Config\Config;
 use VonNeumannGame\Domain\AsteroidTrajectory;
 use VonNeumannGame\Domain\NeumannProbe;
@@ -66,98 +65,87 @@ final class AsteroidTrajectoryService
     {
         return $this->probes->withProbeLock($selectedProbe->id, function () use ($player, $selectedProbe, $asteroidId, $request): AsteroidTrajectory {
             $probe = $this->probes->findById($selectedProbe->id) ?? $selectedProbe;
-            $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-            $activeTrajectory = $this->trajectories->findActiveByAsteroidId($asteroidId);
-            if ($activeTrajectory !== null && $activeTrajectory->currentSector->equals($probe->currentSector)) {
-                throw new AsteroidTrajectoryException(409, 'asteroid_trajectory_already_active', 'This asteroid already has an active trajectory.');
-            }
-            $asteroid = $sector->findObjectById($asteroidId);
-            if (!$asteroid instanceof Asteroid) {
-                throw new AsteroidTrajectoryException(404, 'asteroid_not_found', 'The asteroid is not present in the selected probe sector.');
-            }
-            if (!$asteroid->isMotorized()) {
-                throw new AsteroidTrajectoryException(409, 'asteroid_not_motorized', 'This asteroid is not motorized.');
-            }
-            if ($activeTrajectory !== null) {
-                throw new AsteroidTrajectoryException(409, 'asteroid_trajectory_already_active', 'This asteroid already has an active trajectory.');
-            }
-            if ($asteroid->getMotorFuelStatus() !== Asteroid::MOTOR_FUEL_FULL) {
-                throw new AsteroidTrajectoryException(409, 'asteroid_motor_empty', 'This asteroid motor is empty.');
-            }
-
-            $mode = $request['mode'] ?? null;
-            if (!is_string($mode) || !in_array($mode, [AsteroidTrajectory::MODE_SYSTEM_IMPACT, AsteroidTrajectory::MODE_SECTOR_TRANSFER], true)) {
-                throw new AsteroidTrajectoryException(422, 'invalid_asteroid_trajectory_mode', 'Unknown asteroid trajectory mode.');
-            }
-
-            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-            $values = $mode === AsteroidTrajectory::MODE_SYSTEM_IMPACT
-                ? $this->systemImpactValues($probe, $sector, $asteroid, $request, $now)
-                : $this->sectorTransferValues($player, $probe, $asteroid, $request, $now);
-            foreach ($sector->containersForObject($asteroidId) as $container) { $this->storageTransfers?->interruptExternal($container->getId(),$now->format('c')); }
-            $values['launcherProbeId'] = $probe->id;
-            $values['asteroidSnapshot'] = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY)->toArray();
-            $values['attachmentsSnapshot'] = array_map(
-                static fn(\VonNeumannGame\Sector\SectorDetachedContainer $container): array => $container->toArray(),
-                $sector->containersForObject($asteroidId),
-            );
-
-            try {
-                $trajectory = $this->trajectories->create($values);
-            } catch (PDOException $error) {
-                if ($this->trajectories->findActiveByAsteroidId($asteroidId) !== null) {
+            return $this->sectors->changeMineablesAfterCommit($probe->currentSector, [$asteroidId], function (SectorContent $sector) use ($player, $probe, $asteroidId, $request): AsteroidTrajectory {
+                $activeTrajectory = $this->trajectories->findActiveByAsteroidId($asteroidId);
+                if ($activeTrajectory !== null && $activeTrajectory->currentSector->equals($probe->currentSector)) {
                     throw new AsteroidTrajectoryException(409, 'asteroid_trajectory_already_active', 'This asteroid already has an active trajectory.');
                 }
-                throw $error;
-            }
-            $this->mannyService?->recallMiningManniesTargetingDetachedContainers(
-                array_values(array_filter(array_map(
-                    static fn(array $container): string => is_string($container['id'] ?? null) ? trim($container['id']) : '',
-                    $values['attachmentsSnapshot'],
-                ))),
-                'target_container_departed_with_asteroid',
-            );
-            // A recall removes the Manny's sector object from a freshly loaded
-            // aggregate. Reload before saving the launch state so that this
-            // method cannot overwrite that removal with its older snapshot.
-            $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-            if ($mode === AsteroidTrajectory::MODE_SECTOR_TRANSFER) {
-                if (!$sector->removeObjectById($asteroidId)) {
-                    throw new \RuntimeException('Unable to remove the departing asteroid from its origin.');
+                $asteroid = $sector->findObjectById($asteroidId);
+                if (!$asteroid instanceof Asteroid) {
+                    throw new AsteroidTrajectoryException(404, 'asteroid_not_found', 'The asteroid is not present in the selected probe sector.');
                 }
-                $sector->removeContainersForObject($asteroidId);
-            } else {
-                $emptyAsteroid = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY);
-                if (!$sector->replaceObject($emptyAsteroid)) {
-                    throw new \RuntimeException('Unable to persist asteroid fuel consumption.');
+                if (!$asteroid->isMotorized()) {
+                    throw new AsteroidTrajectoryException(409, 'asteroid_not_motorized', 'This asteroid is not motorized.');
                 }
-            }
-            $this->sectors->saveSector($sector);
-            $this->events->schedule(
-                'asteroid.trajectory.phase',
-                'asteroid_trajectory',
-                $trajectory->id,
-                $trajectory->nextTransitionAt,
-                [
-                    'trajectoryId' => $trajectory->id,
-                    'expectedStatus' => $trajectory->status,
-                    'expectedSectorsCrossed' => $trajectory->mode === AsteroidTrajectory::MODE_SECTOR_TRANSFER
-                        ? $trajectory->sectorsCrossed
-                        : null,
-                ],
-            );
-            $ignitionAlertMessage = $this->ignitionAlertMessage($trajectory, $sector);
-            foreach ($this->probes->findBySector($probe->currentSector) as $localProbe) {
-                $this->alerts?->createAsteroidTrajectoryAlert(
-                    $localProbe->id,
-                    $probe->currentSector,
-                    $trajectory->uid,
-                    $asteroidId,
-                    $ignitionAlertMessage,
-                );
-            }
+                if ($activeTrajectory !== null) {
+                    throw new AsteroidTrajectoryException(409, 'asteroid_trajectory_already_active', 'This asteroid already has an active trajectory.');
+                }
+                if ($asteroid->getMotorFuelStatus() !== Asteroid::MOTOR_FUEL_FULL) {
+                    throw new AsteroidTrajectoryException(409, 'asteroid_motor_empty', 'This asteroid motor is empty.');
+                }
 
-            return $trajectory;
+                $mode = $request['mode'] ?? null;
+                if (!is_string($mode) || !in_array($mode, [AsteroidTrajectory::MODE_SYSTEM_IMPACT, AsteroidTrajectory::MODE_SECTOR_TRANSFER], true)) {
+                    throw new AsteroidTrajectoryException(422, 'invalid_asteroid_trajectory_mode', 'Unknown asteroid trajectory mode.');
+                }
+
+                $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+                $values = $mode === AsteroidTrajectory::MODE_SYSTEM_IMPACT
+                    ? $this->systemImpactValues($probe, $sector, $asteroid, $request, $now)
+                    : $this->sectorTransferValues($player, $probe, $asteroid, $request, $now);
+                foreach ($sector->containersForObject($asteroidId) as $container) { $this->storageTransfers?->interruptExternal($container->getId(),$now->format('c')); }
+                $values['launcherProbeId'] = $probe->id;
+                $values['asteroidSnapshot'] = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY)->toDescriptor();
+                $values['attachmentsSnapshot'] = array_map(
+                    static fn(\VonNeumannGame\Sector\SectorDetachedContainer $container): array => $container->toArray(),
+                    $sector->containersForObject($asteroidId),
+                );
+
+                $trajectory = $this->trajectories->create($values);
+                $this->mannyService?->recallMiningManniesTargetingDetachedContainers(
+                    array_values(array_filter(array_map(
+                        static fn(array $container): string => is_string($container['id'] ?? null) ? trim($container['id']) : '',
+                        $values['attachmentsSnapshot'],
+                    ))),
+                    'target_container_departed_with_asteroid',
+                );
+                if ($mode === AsteroidTrajectory::MODE_SECTOR_TRANSFER) {
+                    if (!$sector->removeObjectById($asteroidId)) {
+                        throw new \RuntimeException('Unable to remove the departing asteroid from its origin.');
+                    }
+                    $sector->removeContainersForObject($asteroidId);
+                } else {
+                    $emptyAsteroid = $asteroid->withMotorFuelStatus(Asteroid::MOTOR_FUEL_EMPTY);
+                    if (!$sector->replaceObject($emptyAsteroid)) {
+                        throw new \RuntimeException('Unable to persist asteroid fuel consumption.');
+                    }
+                }
+                $this->events->schedule(
+                    'asteroid.trajectory.phase',
+                    'asteroid_trajectory',
+                    $trajectory->id,
+                    $trajectory->nextTransitionAt,
+                    [
+                        'trajectoryId' => $trajectory->id,
+                        'expectedStatus' => $trajectory->status,
+                        'expectedSectorsCrossed' => $trajectory->mode === AsteroidTrajectory::MODE_SECTOR_TRANSFER
+                            ? $trajectory->sectorsCrossed
+                            : null,
+                    ],
+                );
+                $ignitionAlertMessage = $this->ignitionAlertMessage($trajectory, $sector);
+                foreach ($this->probes->findBySector($probe->currentSector) as $localProbe) {
+                    $this->alerts?->createAsteroidTrajectoryAlert(
+                        $localProbe->id,
+                        $probe->currentSector,
+                        $trajectory->uid,
+                        $asteroidId,
+                        $ignitionAlertMessage,
+                    );
+                }
+
+                return $trajectory;
+            });
         });
     }
 

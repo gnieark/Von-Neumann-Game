@@ -47,6 +47,8 @@ final class StorageLockRepository
             'depot' => ['germination_depots', 'id'], 'container' => ['storage_containers', 'id'],
             'detached' => ['detached_storage_containers', 'object_id'],
             'broadcast' => ['anomaly_broadcasts', 'id'],
+            // The durable identity remains lockable when a stock has been consumed/deleted.
+            'mineable' => ['mineable_object_identities', 'object_id'],
             default => throw new \InvalidArgumentException('Unknown storage lock root.'),
         };
         $mysql = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql';

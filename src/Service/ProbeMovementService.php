@@ -74,6 +74,7 @@ final class ProbeMovementService
 
     public function startMovement(NeumannProbe $probe, SectorCoordinates $target, ?Player $player = null): ProbeMovement
     {
+        $probe = $this->refreshProbeMovementState($probe);
         return $this->probes->withProbeLock($probe->id, function () use ($probe, $target, $player): ProbeMovement {
             return $this->startMovementLocked($this->probes->findById($probe->id) ?? $probe, $target, $player);
         });
@@ -181,6 +182,7 @@ final class ProbeMovementService
             return $this->withComputedMovementState($probe, $movement, $phase, $now);
         }
 
+        if ($this->isAtOrAfter($now, $movement->arrivalAt)) { $this->sectors?->getOrCreateSector($movement->target); }
         return $this->probes->withProbeLock($probe->id, function () use ($probe): NeumannProbe {
             return $this->refreshProbeMovementStateLocked(
                 $this->probes->findById($probe->id) ?? $probe,
@@ -467,59 +469,12 @@ final class ProbeMovementService
     private function registerForgottenMannies(NeumannProbe $probe): void
     {
         $this->sectorStorageTransfers?->interruptProbe($probe->id, gmdate('c'));
-        if ($this->mannies === null || $this->sectors === null) {
-            return;
-        }
-
-        $sector = null;
-        $changed = false;
-        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if ($manny->isOnProbe() || $manny->sector === null || !$manny->sector->equals($probe->currentSector)) {
-                continue;
-            }
-
-            $sector ??= $this->sectors->getOrCreateSector($probe->currentSector);
-            $object = new SectorManny(
-                SectorManny::objectIdForUid($manny->uid),
-                $manny->name,
-                $manny->uid,
-                SectorManny::STATE_FORGOTTEN,
-                $this->mannyCargoArray($manny),
-                'Manny left behind by its probe.',
-            );
-            if (!$sector->replaceObject($object)) {
-                $sector->addObject($object);
-            }
-            $changed = true;
-        }
-
-        if ($changed && $sector !== null) {
-            $this->sectors->saveSector($sector);
-        }
+        $this->mannies?->markSectorForgottenForProbe($probe, true);
     }
 
     private function removeForgottenManniesAfterCancellation(NeumannProbe $probe): void
     {
-        if ($this->mannies === null || $this->sectors === null) {
-            return;
-        }
-
-        $sector = $this->sectors->getOrCreateSector($probe->currentSector);
-        $changed = false;
-        foreach ($this->mannies->findByProbeId($probe->id) as $manny) {
-            if ($manny->sector === null || !$manny->sector->equals($probe->currentSector)) {
-                continue;
-            }
-            $objectId = SectorManny::objectIdForUid($manny->uid);
-            $object = $sector->findObjectById($objectId);
-            if ($object instanceof SectorManny && $object->getState() === SectorManny::STATE_FORGOTTEN) {
-                $changed = $sector->removeObjectById($objectId) || $changed;
-            }
-        }
-
-        if ($changed) {
-            $this->sectors->saveSector($sector);
-        }
+        $this->mannies?->markSectorForgottenForProbe($probe, false);
     }
 
     private function createIntelligentLifeAlerts(NeumannProbe $probe, ProbeMovement $movement): void
@@ -806,6 +761,8 @@ final class ProbeMovementService
     {
         $probeId = (int) ($payload['probeId'] ?? 0);
         if ($probeId <= 0) { return; }
+        $sector = $this->sectorFromPayload($payload['sector'] ?? null);
+        if ($sector !== null) { $this->sectors?->getOrCreateSector($sector); }
         try {
             $this->probes->withProbeLock($probeId, fn() => $this->breakStorageContainerLocked($payload, $mannyService, $othersService));
         } catch (MannyActionException) {

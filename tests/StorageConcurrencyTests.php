@@ -45,7 +45,7 @@ $connect=static function()use($factory,$tables):PDO{
 };
 $services=static function(PDO $db)use($directory):array{
     $others=new OthersRepository($db);$events=new ScheduledEventRepository($db);$depots=new GerminationDepotRepository($db);
-    $detached=new \VonNeumannGame\Repository\DetachedStorageContainerRepository($db);$sectors=new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',detachedContainers:$detached,germinationDepots:$depots);
+    $detached=new \VonNeumannGame\Repository\DetachedStorageContainerRepository($db);$sectors=new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',pdo:$db,detachedContainers:$detached,germinationDepots:$depots);
     $transaction=new \VonNeumannGame\Database\StorageTransaction($db);$locks=new \VonNeumannGame\Repository\Storage\StorageLockRepository($db);$transfers=new \VonNeumannGame\Repository\Storage\SectorStorageTransferRepository($db);$inventories=new \VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory($db);
     $effects=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db),$events,$sectors);$waves=new AnomalyBroadcastService(new \VonNeumannGame\Repository\Storage\AnomalyBroadcastRepository($db),$transaction,$locks,$events,new \VonNeumannGame\Repository\OthersAuditRepository($db));
     $construction=new GerminationDepotService($others,$events,$sectors,$effects,$waves,$transaction,$locks,new \VonNeumannGame\Repository\Storage\StorageActorRepository($db),$depots,$detached);
@@ -65,7 +65,7 @@ $race=static function(array $operations)use($connect):array{
             try{
                 $db=$connect();fwrite($pair[1],"ready\n");fgets($pair[1]);
                 try{$result=['ok'=>true,'result'=>$operation($db)];}
-                catch(Throwable $error){$result=['ok'=>false,'class'=>get_class($error),'message'=>$error->getMessage(),'code'=>$error->errorCode??null];}
+                catch(Throwable $error){$result=['ok'=>false,'class'=>get_class($error),'message'=>$error->getMessage(),'cause'=>$error->getPrevious()?->getMessage(),'code'=>$error->errorCode??null];}
                 fwrite($pair[1],json_encode($result,JSON_THROW_ON_ERROR)."\n");fclose($pair[1]);exit(0);
             }catch(Throwable $error){fwrite($pair[1],json_encode(['ok'=>false,'message'=>$error->getMessage()])."\n");exit(1);}
         }
@@ -79,6 +79,16 @@ $race=static function(array $operations)use($connect):array{
 };
 try{
     $db=$connect();(new SchemaInitializer($config->driver))->initialize($db);
+    if ($mysqlConfig !== null) {
+        // Exercise the maintenance upgrade against the actual MariaDB DDL, on
+        // this suite's isolated tables, while no worker is running.
+        $db->exec('ALTER TABLE sector_effects MODIFY COLUMN effect_type VARCHAR(255) NOT NULL');
+        $db->exec("ALTER TABLE sector_effects ADD CONSTRAINT old_effect_type CHECK(effect_type IN ('add_object','consume_object','patch_objects'))");
+        $migration = new \VonNeumannGame\Database\Migration\SectorCreationSchemaMigration($db);
+        $assert($migration->run(false)['changeRequired'], 'MariaDB schema dry run detects the old sector effect constraint');
+        $migration->run(true);
+        $assert(!$migration->run(true)['changeRequired'], 'MariaDB sector creation schema upgrade is resumable');
+    }
     $now=gmdate('c');$db->prepare('INSERT INTO players(username,created_at,updated_at) VALUES(?,?,?)')->execute(['race-player',$now,$now]);
     $others=new OthersRepository($db);$fleet=$others->createFleet(1,3,4,5);$ship=$others->findShipsByFleetId((int)$fleet['id'])[0];
     $standard=$others->createStandardShip($ship);$actors=[$others->createAuxiliary((int)$ship['id']),$others->createAuxiliary((int)$standard['id'])];
@@ -157,10 +167,10 @@ try{
     $db=$connect();
     $assert((int)$db->query('SELECT COUNT(*) FROM anomaly_broadcasts WHERE depot_id='.(int)$nextDepot['id'])->fetchColumn()===1,'concurrent opening creates exactly one durable broadcast');
     $effectObject=\VonNeumannGame\Sector\DormantConstruct::fromOthersAuxiliary('effect-race-actor');
-    $db->beginTransaction();$effectService=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db),new ScheduledEventRepository($db),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture'));
+    $db->beginTransaction();$effectService=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db),new ScheduledEventRepository($db),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',pdo:$db));
     $effectService->enqueue('effect-race',new SectorCoordinates(3,4,5),'add_object',$effectObject->getId(),$effectObject->toArray(),$now);$db->commit();
     $effectId=(int)$db->query("SELECT id FROM sector_effects WHERE operation_id='effect-race'")->fetchColumn();$db=null;
-    $applyEffect=static function(PDO $pdo)use($directory,$effectId):bool{$service=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo),new ScheduledEventRepository($pdo),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture'));$service->apply($effectId);return true;};
+    $applyEffect=static function(PDO $pdo)use($directory,$effectId):bool{$service=new SectorEffectService(new \VonNeumannGame\Repository\Storage\SectorEffectRepository($pdo),new ScheduledEventRepository($pdo),new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'concurrency-fixture',pdo:$pdo));$service->apply($effectId);return true;};
     $results=$race([$applyEffect,$applyEffect]);$assert($results[0]['ok']&&$results[1]['ok'],'two workers can replay one committed sector effect');
     $db=$connect();$sector=(new SectorFileRepository($directory))->load(new SectorCoordinates(3,4,5));
     $effectCopies=count(array_filter($sector->getObjects(),static fn($object):bool=>$object->getId()===$effectObject->getId()));
@@ -179,7 +189,7 @@ try{
         $checks=$db->query("SELECT CONSTRAINT_NAME,CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='sector_effects'")->fetchAll(PDO::FETCH_ASSOC);
         foreach($checks as $check){if(str_contains($check['CHECK_CLAUSE'],'effect_type')){$db->exec('ALTER TABLE sector_effects DROP CONSTRAINT `'.$check['CONSTRAINT_NAME'].'`');}}
         $db->exec("ALTER TABLE sector_effects ADD CONSTRAINT old_sector_effect_type CHECK(effect_type IN ('add_object','consume_object'))");
-        $upgrade=new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($db,new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'migration'));
+        $upgrade=new \VonNeumannGame\Database\Migration\OthersPersistenceMigration($db,new SectorService(new SectorFileRepository($directory),new SectorContentGenerator(),'migration',pdo:$db));
         $assert($upgrade->run(true)['migratedOperations']===0,'Others migration upgrades the real MariaDB CHECK constraint');
         $db->beginTransaction();
         $newEffects=new \VonNeumannGame\Repository\Storage\SectorEffectRepository($db);
@@ -211,6 +221,9 @@ try{
     $assert((int)$db->query("SELECT COUNT(*) FROM others_inventory_items WHERE public_id='race-last-item'")->fetchColumn()===1,'migration preserves referenced item identities');
     $db=null;
     require __DIR__ . '/Support/DetachedContainerMannyConcurrencyTests.php';
+    require __DIR__ . '/Support/MineableObjectStockConcurrencyTests.php';
+    require __DIR__ . '/Support/MineableLifecycleConcurrencyTests.php';
+    require __DIR__ . '/Support/ForgottenMannyConcurrencyTests.php';
 }finally{
     // Remove only tables bearing this run's unpredictable prefix.
     if($tables!==[]){

@@ -45,33 +45,43 @@ final class AsteroidTrajectoryRepository
             throw new \InvalidArgumentException('Trajectory sectors must be SectorCoordinates values.');
         }
         $direction = is_array($values['direction'] ?? null) ? $values['direction'] : [];
-        $stmt->execute([
-            'uid' => $uid,
-            'asteroid_id' => (string) $values['asteroidId'],
-            'mode' => (string) $values['mode'],
-            'status' => (string) $values['status'],
-            'origin_x' => $origin->getX(), 'origin_y' => $origin->getY(), 'origin_z' => $origin->getZ(),
-            'current_x' => $current->getX(), 'current_y' => $current->getY(), 'current_z' => $current->getZ(),
-            'direction_x' => $direction['x'] ?? null, 'direction_y' => $direction['y'] ?? null, 'direction_z' => $direction['z'] ?? null,
-            'launcher_probe_id' => $values['launcherProbeId'] ?? null,
-            'target_object_id' => $values['targetObjectId'] ?? null,
-            'target_probe_id' => $values['targetProbeId'] ?? null,
-            'target_speed_c' => $values['targetSpeedC'] ?? null,
-            'asteroid_mass_earth' => (float) $values['asteroidMassEarth'],
-            'star_mass_solar' => $values['starMassSolar'] ?? null,
-            'acceleration_started_at' => $values['accelerationStartedAt'] ?? null,
-            'acceleration_ends_at' => $values['accelerationEndsAt'] ?? null,
-            'revolution_duration_seconds' => $values['revolutionDurationSeconds'] ?? null,
-            'planned_revolutions' => $values['plannedRevolutions'] ?? null,
-            'next_transition_at' => (string) $values['nextTransitionAt'],
-            'sectors_crossed' => (int) ($values['sectorsCrossed'] ?? 0),
-            'capture_penalty_steps' => (int) ($values['capturePenaltySteps'] ?? 0),
-            'maximum_sector_crossings' => (int) $values['maximumSectorCrossings'],
-            'asteroid_snapshot_json' => json_encode($values['asteroidSnapshot'] ?? [], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-            'attachments_snapshot_json' => json_encode($values['attachmentsSnapshot'] ?? [], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
-            'created_at' => $now,
-            'updated_at' => $now,
-        ]);
+        try {
+            $stmt->execute([
+                'uid' => $uid,
+                'asteroid_id' => (string) $values['asteroidId'],
+                'mode' => (string) $values['mode'],
+                'status' => (string) $values['status'],
+                'origin_x' => $origin->getX(), 'origin_y' => $origin->getY(), 'origin_z' => $origin->getZ(),
+                'current_x' => $current->getX(), 'current_y' => $current->getY(), 'current_z' => $current->getZ(),
+                'direction_x' => $direction['x'] ?? null, 'direction_y' => $direction['y'] ?? null, 'direction_z' => $direction['z'] ?? null,
+                'launcher_probe_id' => $values['launcherProbeId'] ?? null,
+                'target_object_id' => $values['targetObjectId'] ?? null,
+                'target_probe_id' => $values['targetProbeId'] ?? null,
+                'target_speed_c' => $values['targetSpeedC'] ?? null,
+                'asteroid_mass_earth' => (float) $values['asteroidMassEarth'],
+                'star_mass_solar' => $values['starMassSolar'] ?? null,
+                'acceleration_started_at' => $values['accelerationStartedAt'] ?? null,
+                'acceleration_ends_at' => $values['accelerationEndsAt'] ?? null,
+                'revolution_duration_seconds' => $values['revolutionDurationSeconds'] ?? null,
+                'planned_revolutions' => $values['plannedRevolutions'] ?? null,
+                'next_transition_at' => (string) $values['nextTransitionAt'],
+                'sectors_crossed' => (int) ($values['sectorsCrossed'] ?? 0),
+                'capture_penalty_steps' => (int) ($values['capturePenaltySteps'] ?? 0),
+                'maximum_sector_crossings' => (int) $values['maximumSectorCrossings'],
+                'asteroid_snapshot_json' => json_encode(\VonNeumannGame\Sector\MineableDescriptors::descriptor($values['asteroidSnapshot'] ?? []), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                'attachments_snapshot_json' => json_encode($values['attachmentsSnapshot'] ?? [], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+
+        } catch (\PDOException $error) {
+            $unique = (int) ($error->errorInfo[1] ?? 0) === 1062
+                || ((int) ($error->errorInfo[1] ?? 0) === 19 && str_contains($error->getMessage(), 'UNIQUE constraint failed'));
+            if ($unique && $this->findActiveByAsteroidId((string) $values['asteroidId']) !== null) {
+                throw new \VonNeumannGame\Service\AsteroidTrajectory\AsteroidTrajectoryException(409, 'asteroid_trajectory_already_active', 'This asteroid already has an active trajectory.');
+            }
+            throw $error;
+        }
 
         return $this->findById((int) $this->pdo->lastInsertId()) ?? throw new \RuntimeException('Trajectory creation failed.');
     }
@@ -90,26 +100,13 @@ final class AsteroidTrajectoryRepository
      */
     public function withLockedTrajectory(int $id, callable $callback): mixed
     {
-        $ownsTransaction = !$this->pdo->inTransaction();
-        if ($ownsTransaction) {
-            $this->pdo->beginTransaction();
-        }
-        try {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($id, $callback): mixed {
             $suffix = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : '';
             $stmt = $this->pdo->prepare('SELECT * FROM asteroid_trajectories WHERE id = :id' . $suffix);
             $stmt->execute(['id' => $id]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            $result = $callback($row ? $this->hydrate($row) : null);
-            if ($ownsTransaction) {
-                $this->pdo->commit();
-            }
-            return $result;
-        } catch (\Throwable $error) {
-            if ($ownsTransaction && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $error;
-        }
+            return $callback($row ? $this->hydrate($row) : null);
+        });
     }
 
     public function findByUid(string $uid): ?AsteroidTrajectory
@@ -127,6 +124,20 @@ final class AsteroidTrajectoryRepository
         $stmt->execute([$asteroidId, ...AsteroidTrajectory::ACTIVE_STATUSES]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ? $this->hydrate($row) : null;
+    }
+
+    /** Current read after taking the source lock, including terminal capture until JSON catches up. */
+    public function allowsMiningAt(string $asteroidId, SectorCoordinates $sector): bool
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Transit revalidation requires the source transaction.'); }
+        $suffix = $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' LOCK IN SHARE MODE' : '';
+        $stmt = $this->pdo->prepare("SELECT * FROM asteroid_trajectories WHERE asteroid_id=? AND mode='sector_transfer' ORDER BY id DESC LIMIT 1" . $suffix);
+        $stmt->execute([$asteroidId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) { return true; }
+        $trajectory = $this->hydrate($row);
+        return in_array($trajectory->status, [AsteroidTrajectory::STATUS_CAPTURED, AsteroidTrajectory::STATUS_ORBITING_BLACK_HOLE], true)
+            && $trajectory->currentSector->equals($sector);
     }
 
     /** @return list<AsteroidTrajectory> */

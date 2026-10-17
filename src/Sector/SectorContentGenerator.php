@@ -440,7 +440,7 @@ final class SectorContentGenerator
     {
         $parts = [];
         foreach ($knownNeighbors as $neighbor) {
-            $parts[] = $neighbor->getCoordinates()->toKey() . '=' . hash('sha256', json_encode($neighbor->toArray(), JSON_THROW_ON_ERROR));
+            $parts[] = $neighbor->getCoordinates()->toKey() . '=' . hash('sha256', json_encode($neighbor->toDescriptor(), JSON_THROW_ON_ERROR));
         }
         sort($parts);
 

@@ -6,6 +6,7 @@ namespace VonNeumannGame\Sector;
 
 final class DormantConstruct extends UniverseObject
 {
+    private readonly array $resourceAmounts;
     public const ACTIVITY_STATUS = 'dormant';
     public const APPARENT_ORIGIN = 'unknown_non_natural';
     public const KNOWN_FUNCTION = 'unknown';
@@ -34,11 +35,14 @@ final class DormantConstruct extends UniverseObject
         array $waypointBookmarks = [],
         private readonly ?string $inspectionScenario = null,
         private readonly ?string $subtype = null,
-        private readonly array $resourceAmounts = [],
+        array $resourceAmounts = [],
         private readonly bool $identified = false,
         private readonly ?string $originalAuxiliaryId = null,
     ) {
         parent::__construct($id, $name, UniverseObjectType::DormantConstruct, $mass, $radius, $description, $waypointBookmarks);
+        $this->resourceAmounts = $subtype === self::SUBTYPE_OTHERS_MOTHERSHIP_WRECK
+            ? \VonNeumannGame\Domain\MineableResourceAmounts::normalize(array_replace(\VonNeumannGame\Domain\MineableResourceAmounts::zero(), $resourceAmounts))
+            : $resourceAmounts;
     }
 
     /**

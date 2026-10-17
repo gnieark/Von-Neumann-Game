@@ -29,6 +29,23 @@ final class DetachedStorageContainerRepository
         return $this->hydrateRows($stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /** Rare source transformations snapshot attachments only after taking their source locks. */
+    public function lockAttachedToTargets(SectorCoordinates $sector, array $objectIds): array
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Attachment locks require the source transaction.'); }
+        if ($objectIds === []) { return []; }
+        $statement = $this->pdo->prepare("SELECT * FROM detached_storage_containers
+            WHERE sector_x=? AND sector_y=? AND sector_z=? AND status='available'
+              AND target_object_id IN (" . $this->placeholders($objectIds) . ') ORDER BY object_id' . $this->currentReadSuffix());
+        $statement->execute([$sector->getX(), $sector->getY(), $sector->getZ(), ...$objectIds]);
+        return $this->hydrateRows($statement->fetchAll(PDO::FETCH_ASSOC), currentRead: true);
+    }
+
+    private function currentReadSuffix(): string
+    {
+        return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : '';
+    }
+
     public function findByObjectId(string $objectId): ?SectorDetachedContainer
     {
         $stmt = $this->pdo->prepare('SELECT * FROM detached_storage_containers WHERE object_id = :object_id');
@@ -58,7 +75,7 @@ final class DetachedStorageContainerRepository
         }
         try {
             $this->assertNoContentTransfer($container->getId());
-            $check=$this->pdo->prepare('SELECT storage_version FROM detached_storage_containers WHERE object_id=?');
+            $check=$this->pdo->prepare('SELECT storage_version FROM detached_storage_containers WHERE object_id=?' . $this->currentReadSuffix());
             $check->execute([$container->getId()]);$version=$check->fetchColumn();
             if($version!==false && (int)$version!==$container->storageVersion()){throw new \VonNeumannGame\Service\MannyActionException(409,'inventory_changed','Container changed; reload before updating.');}
             $this->upsertContainer($sector, $container);
@@ -212,7 +229,7 @@ final class DetachedStorageContainerRepository
      * @param list<array<string, mixed>> $rows
      * @return list<SectorDetachedContainer>
      */
-    private function hydrateRows(array $rows): array
+    private function hydrateRows(array $rows, bool $currentRead = false): array
     {
         if ($rows === []) {
             return [];
@@ -223,6 +240,7 @@ final class DetachedStorageContainerRepository
              FROM detached_storage_container_resources
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')',
             $ids,
+            $currentRead,
         );
         $items = $this->childrenByContainer(
             'SELECT container_object_id, uid, type, name, container_space, recipe, crafting_run_id,
@@ -232,6 +250,7 @@ final class DetachedStorageContainerRepository
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY is_backing_item DESC, id ASC',
             $ids,
+            $currentRead,
         );
         $rules = $this->childrenByContainer(
             'SELECT container_object_id, rule_kind, resource_type, sort_order
@@ -239,6 +258,7 @@ final class DetachedStorageContainerRepository
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY rule_kind ASC, sort_order ASC',
             $ids,
+            $currentRead,
         );
         $discoveries = $this->childrenByContainer(
             'SELECT container_object_id, player_id
@@ -246,6 +266,7 @@ final class DetachedStorageContainerRepository
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY player_id ASC',
             $ids,
+            $currentRead,
         );
         $bookmarks = $this->childrenByContainer(
             'SELECT container_object_id, player_id, name, player_name, created_at
@@ -253,6 +274,7 @@ final class DetachedStorageContainerRepository
              WHERE container_object_id IN (' . $this->placeholders($ids) . ')
              ORDER BY created_at ASC, player_id ASC, name ASC',
             $ids,
+            $currentRead,
         );
 
         $containers = [];
@@ -354,7 +376,7 @@ final class DetachedStorageContainerRepository
             throw new \RuntimeException("Detached container '{$container->getId()}' has no source container uid.");
         }
         $now = gmdate('c');
-        $exists = $this->pdo->prepare('SELECT COUNT(*) FROM detached_storage_containers WHERE object_id = :object_id');
+        $exists = $this->pdo->prepare('SELECT object_id FROM detached_storage_containers WHERE object_id = :object_id' . $this->currentReadSuffix());
         $exists->execute(['object_id' => $container->getId()]);
         $params = [
             'object_id' => $container->getId(),
@@ -377,7 +399,7 @@ final class DetachedStorageContainerRepository
             'created_at' => $container->getCreatedAt(),
             'updated_at' => $now,
         ];
-        if ((int) $exists->fetchColumn() > 0) {
+        if ($exists->fetchColumn() !== false) {
             $stmt = $this->pdo->prepare(
                 'UPDATE detached_storage_containers SET
                     source_container_uid = :source_container_uid,
@@ -533,9 +555,9 @@ final class DetachedStorageContainerRepository
      * @param list<string> $ids
      * @return array<string, list<array<string, mixed>>>
      */
-    private function childrenByContainer(string $sql, array $ids): array
+    private function childrenByContainer(string $sql, array $ids, bool $currentRead = false): array
     {
-        $stmt = $this->pdo->prepare($sql);
+        $stmt = $this->pdo->prepare($sql . ($currentRead ? $this->currentReadSuffix() : ''));
         $stmt->execute($ids);
         $grouped = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {

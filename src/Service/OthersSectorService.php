@@ -32,18 +32,18 @@ final class OthersSectorService
     public function getOrCreateSector(SectorCoordinates $coordinates): SectorContent
     {
         if ($this->effects->inTransaction()) { $this->effects->lockSector($coordinates); }
-        $sector = $this->sectors->getOrCreateSector($coordinates);
+        $sector = $this->sectors->getSectorForEffects($coordinates);
         $this->effects->project($sector);
-        $this->snapshots[$sector] = array_column($sector->toArray()['objects'], null, 'id');
+        $this->snapshots[$sector] = array_column($sector->toDescriptor()['objects'], null, 'id');
         return $sector;
     }
 
-    public function saveSector(SectorContent $sector): void
+    public function saveSector(SectorContent $sector, ?string $operation = null): void
     {
         if (!$this->effects->inTransaction()) { throw new \LogicException('Others sector changes must join their SQL transaction.'); }
         $this->sectors->saveDetachedContainerChanges($sector);
         $before = $this->snapshots[$sector] ?? throw new \LogicException('Read the sector projection before changing it.');
-        $after = array_column($sector->toArray()['objects'], null, 'id');
+        $after = array_column($sector->toDescriptor()['objects'], null, 'id');
         $changes = [];
         foreach (array_unique([...array_keys($before), ...array_keys($after)]) as $id) {
             if (($before[$id] ?? null) != ($after[$id] ?? null)) {
@@ -51,7 +51,7 @@ final class OthersSectorService
             }
         }
         if ($changes !== []) {
-            $operation = 'others-sector-' . bin2hex(random_bytes(16));
+            $operation ??= 'others-sector-' . bin2hex(random_bytes(16));
             $this->enqueue($operation, $sector->getCoordinates(), 'patch_objects', '', ['changes' => $changes], gmdate('c'));
             $sector->markEffectApplied($operation);
         }
