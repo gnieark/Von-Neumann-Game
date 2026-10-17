@@ -229,3 +229,50 @@ Validation : tests moteur/API, et concurrence réelle sur SQLite et MariaDB de d
 Les courses sont enveloppées par la reprise de l'unité SQL entière : l'intégration de la politique de reprise dans le scheduler appartient toujours au lot 5. La suite MariaDB a révélé un interblocage intermittent sur le verrou de secteur existant : `INSERT IGNORE` prenait un verrou partagé avant la demande exclusive. Il est remplacé par un upsert sans changement de valeur, qui prend directement le verrou exclusif ; une course répétée vérifie cette acquisition. Cela ne constitue pas une démonstration d'absence d'interblocages dans toutes les familles d'actions. Les enveloppes actuelles de sonde et les transactions de finalisation du minage restent à refondre aux lots 4 et 4 bis, avec consolidation de l'ordre des verrous. La branche reste non déployable avant les lots 4, 4 bis, 5, 6 et 7. Aucune donnée de production n'a été modifiée.
 
 Vérification finale du lot 3 : `php tests/SectorTests.php` — **460 succès** ; `php tests/ApiTests.php` — **4 558 succès** ; suites de concurrence SQLite et MariaDB — succès, y compris le verrou de secteur répété et la conservation des cargaisons après lecture périmée. Syntaxe PHP et `git diff --check` vérifiés. Logs de développement : `/tmp/vng-lot3-sector.log`, `/tmp/vng-lot3-api.log`, `/tmp/vng-lot3-concurrency-sqlite.log`, `/tmp/vng-lot3-concurrency-mariadb.log`.
+
+## Lot 4 — Minage atomique, 17 octobre
+
+La fin de minage passe par `MannyService::processScheduledMiningTask`. Le débit de source, le crédit, le retour ou l'oubli SQL de la Manny, `manny_tasks` et l'acquittement/report de l'événement partagent une transaction. La Manny est relue sous verrou avec son rattachement et l'identité de tâche ; le bail est vérifié sous verrou avec l'identifiant de worker **et le numéro de prise en charge**, y compris lorsqu'un même worker reprend un événement. Une reprise après commit ne réextrait rien. Une sonde morte/absente ou une Manny disparue/détachée ne sont pas recréées pour terminer une ancienne livraison.
+
+Le vecteur arrondi des quatre ressources est transmis tel quel du débit au crédit. Une source absente, en transit ou sans ligne SQL ne fournit aucune ressource. La capacité réelle du conteneur détaché est lue directement sous son verrou SQL : ressources, objets, Mannies et réservations entrantes. Le crédit incrémente uniquement les lignes de ressources et la version d'inventaire ; il ne remplace pas les enfants, n'efface pas de réservation et ne sauvegarde pas le secteur. Un conteneur disparu conserve son erreur métier et provoque un rollback sans prélèvement. Le réservoir de deutérium conserve son verrou de ligne sonde ; sa place déjà réservée aux transferts reste indisponible au minage.
+
+Pour une livraison embarquée, tous les conteneurs candidats sont verrouillés par ID avant la décision de capacité et le placement. Les ajouts de ressources et d'objets via `ProbeStorageService` utilisent les mêmes racines ; les sorties de fabrication verrouillent leur conteneur réservé. La transaction de minage utilise `READ COMMITTED` sur MariaDB pour relire les inventaires après attente d'un verrou, sans modifier le niveau d'isolation par défaut de la connexion. Les stocks et les contenus détachés utilisent aussi des lectures courantes explicites. SQLite conserve sa sérialisation des writers.
+
+Le lancement acquiert une ligne `mining_order_locks(probe_id, object_id)` puis la Manny avant la lecture des engagements et l'enregistrement de l'ordre. Cette ligne est une exclusion mutuelle locale, sans quantité réservée et sans réservation entre sondes. Elle reste réutilisable jusqu'à la suppression de la sonde (cascade SQL). Le rappel acquiert également la Manny et sa tâche avant décision. La découverte d'une cache lors du lancement est désormais enregistrée directement dans `detached_storage_container_discoveries`, sans sauvegarde du secteur.
+
+L'expiration d'attente est traitée avant l'entrée dans la récolte. Elle ne prend aucun verrou de source et conserve les règles d'abandon existantes ; une Manny abandonnée passe par l'intention durable du lot 2 bis, publiée après commit. Une récolte livrée dont seul le retour manque de place devient `waiting_for_space` : les reprises exécutent le retour, jamais un second prélèvement.
+
+### Matrice de verrous après le lot 4
+
+La flèche décrit les acquisitions métier, hors relecture d'un verrou déjà détenu. L'enveloppe de sonde est encore présente conformément à la dépendance 4/4 bis.
+
+| Opération | Ordre effectif et protection | Suite requise |
+| --- | --- | --- |
+| Lancement minage | Sonde → couple sonde/source → Manny/tâche → éventuelles découvertes de conteneurs | Remplacer l'enveloppe par l'admission coordonnée au lot 4 bis ; la paire protège les engagements locaux |
+| Récolte | Sonde provisoire → Manny/tâche/événement avec bail → source → conteneurs embarqués triés si retour possible → destination détachée | Aucun verrou de secteur ni écriture JSON ; retirer l'enveloppe seulement après intégration 4 bis |
+| Récolte de deutérium | Même ordre ; la ligne sonde protège aussi le réservoir avant la source | Le verrou de réservoir reste distinct de l'enveloppe à retirer |
+| Rappel | Sonde → Manny/tâche ; transition SQL vers retour ou oubli | Les rappels exceptionnels d'autres familles conservent leur protocole |
+| Fabrication | Manny/tâche → conteneur réservé ; réservation remplacée par la sortie dans la même transaction | Validation croisée sans enveloppe au lot 4 bis |
+| Ajout ressource/objet | Ensemble des conteneurs candidats triés → inventaire | Le conteneur sert de racine commune à la capacité, pas uniquement les lignes de ressources |
+| Transfert Manny | Sonde → Manny → transfert → conteneur embarqué → stockage externe | Ordre embarqué/détaché conservé dans le minage |
+| Récupération/détachement | Sonde → tâche/réservations → inventaires ; effets structurels selon l'action | Conserver les protections des opérations rares pendant l'intégration |
+| Mouvement | Sonde → transitions SQL d'oubli ; récupération avec Manny puis conteneurs | Course départ entre décision et commit à valider avec le retrait de l'enveloppe au lot 4 bis |
+| Motorisation, trajectoire, fusion, fragmentation | Acteurs/trajectoire nécessaires → secteur structurel → sources triées → attachements/références concernées | Le minage ne demande jamais le secteur après sa source ; les conflits d'autres familles restent soumis au rollback, puis à la reprise ciblée du lot 5 |
+| Expiration/abandon | Branche exceptionnelle avant récolte → intention structurelle → publication après commit | Aucun débit de source pendant l'abandon |
+
+Cette matrice ne prétend pas démontrer l'absence universelle d'interblocages : les transformations rares qui réécrivent des références actives et les changements d'ensemble de conteneurs doivent être inclus dans la validation conjointe du lot 4 bis. Aucun retry automatique des handlers historiques à effets de fichiers n'a été ajouté. Le report progressif des conflits SQL reste le lot 5.
+
+Migration additive explicite, simulation sans ouverture de connexion par défaut :
+
+```bash
+php scripts/one-shot-scripts/migrate-mining-order-locks.php --database-config=PATH
+php scripts/one-shot-scripts/migrate-mining-order-locks.php --database-config=PATH --apply
+```
+
+Ce script crée uniquement les verrous d'engagements ; le schéma est également déclaré dans `SchemaInitializer`. Il ne convertit aucun stock et n'autorise pas la bascule. Aucun changement du contrat API (v148), aucun changement du moissonnage planétaire Others, aucune écriture en production.
+
+Tests spécifiques : panne après crédit et avant sauvegarde Manny, rollback intégral, reprise après commit avant acquittement, ancien bail repris par le même worker, quatre ressources et arrondis, source absente/ligne absente, capacité consommée après lancement, réservation entrante, dernier 0,0001 ECE de carburant non réservé, destination disparue, fichiers inchangés et absence de ligne de verrou secteur. Courses avec deux connexions : même astéroïde ou même épave, destination commune, ordres concurrents et rappel. MariaDB maintient une transaction de récolte ouverte jusqu'au commit d'une seconde sur des acteurs/sources/destinations indépendants du même secteur : la seconde ne dépend pas de la première.
+
+La branche reste **non déployable** avant les lots 4 bis, 5, 6 et 7. En particulier, l'enveloppe exclusive de sonde n'est pas encore supprimée ; cette étape nécessite le protocole de destruction/admission du lot 4 bis et ses tests.
+
+Vérification du lot 4 : `php tests/SectorTests.php` — **495 succès** ; `php tests/ApiTests.php` — **4 558 succès** ; `php tests/StorageConcurrencyTests.php` et sa variante `--mysql-config=config/database.json` — succès sur SQLite et tables MariaDB isolées. Le scénario de très petites récoltes vérifie aussi que l'arrondi de plusieurs composantes ne dépasse pas le total demandé. Migration de schéma vérifiée en simulation sans connexion ; syntaxe des PHP modifiés/ajoutés et `git diff --check` validés. Logs : `/tmp/vng-lot4-sector.log`, `/tmp/vng-lot4-api.log`, `/tmp/vng-lot4-concurrency-sqlite.log`, `/tmp/vng-lot4-concurrency-mariadb.log`.

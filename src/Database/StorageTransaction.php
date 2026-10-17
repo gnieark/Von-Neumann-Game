@@ -12,12 +12,17 @@ final class StorageTransaction
 {
     private static ?\WeakMap $owners = null;
 
-    public function __construct(private readonly PDO $pdo, private readonly int $maxAttempts = 3, private readonly bool $sqliteWriteIntent = true) {}
+    public function __construct(private readonly PDO $pdo, private readonly int $maxAttempts = 3, private readonly bool $sqliteWriteIntent = true, private readonly bool $readCommitted = false) {}
 
     public function run(callable $operation): mixed
     {
         if ($this->pdo->inTransaction()) { return $operation(); }
         for ($attempt = 0; ; $attempt++) {
+            // Only the next transaction: do not change the connection's default
+            // isolation or the semantics of unrelated legacy handlers.
+            if ($this->readCommitted && $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
+                $this->pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+            }
             $this->pdo->beginTransaction();
             self::$owners ??= new \WeakMap();
             self::$owners[$this->pdo] = [];

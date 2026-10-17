@@ -26,6 +26,22 @@ final class StorageContainerRepository
         $statement->fetchAll();
     }
 
+    public function withPlacementLock(int $probeId, callable $operation): mixed
+    {
+        return (new StorageTransaction($this->pdo, maxAttempts: 1, readCommitted: true))->run(function () use ($probeId, $operation): mixed {
+            $this->lockForMannyPlacement($probeId);
+            return $operation();
+        });
+    }
+
+    public function lockReservedOutput(int $probeId, int $containerId): void
+    {
+        $root = (new Storage\StorageLockRepository($this->pdo))->lock('container', $containerId);
+        if ($root === null || (int) $root['probe_id'] !== $probeId) {
+            throw new \VonNeumannGame\Service\MannyActionException(422, 'invalid_cargo_reservation', 'The reserved storage container is unavailable.');
+        }
+    }
+
     public function ensureCoreContainer(NeumannProbe $probe): StorageContainer
     {
         $existing = $this->findByUidForProbe($probe->id, StorageContainer::CORE_UID);

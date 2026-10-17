@@ -119,6 +119,20 @@ final class ScheduledEventRepository
         }
     }
 
+    /** Fence a claimed execution for the complete resource/task transaction. */
+    public function lockOwned(ScheduledEvent $event): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Event fencing requires a transaction.'); }
+        $statement = $this->pdo->prepare('SELECT status,locked_by,attempts FROM scheduled_events WHERE id=?'
+            . ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : ''));
+        $statement->execute([$event->id]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!$row || $row['status'] !== 'running' || $row['locked_by'] !== $this->workerId
+            || $event->lockedBy !== $this->workerId || (int) $row['attempts'] !== $event->attempts) {
+            $this->throwLeaseLost($event, 'execute');
+        }
+    }
+
     public function markDoneById(int $id): void
     {
         $now = gmdate('c');

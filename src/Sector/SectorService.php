@@ -148,6 +148,21 @@ final class SectorService
         return $this->detachedContainers?->delete($objectId) ?? false;
     }
 
+    public function lockMiningDestination(SectorCoordinates $sector, string $objectId): float
+    {
+        return ($this->detachedContainers ?? throw new \LogicException('Detached storage repository required.'))->lockMiningDestination($sector, $objectId);
+    }
+
+    public function creditMiningDestination(SectorCoordinates $sector, string $objectId, array $amounts): void
+    {
+        ($this->detachedContainers ?? throw new \LogicException('Detached storage repository required.'))->creditMiningDestination($sector, $objectId, $amounts);
+    }
+
+    public function recordDetachedContainerDiscovery(string $objectId, int $playerId): void
+    {
+        ($this->detachedContainers ?? throw new \LogicException('Detached storage repository required.'))->recordDiscovery($objectId, $playerId);
+    }
+
     /**
      * @return array<string>
      */

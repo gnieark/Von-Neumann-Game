@@ -371,14 +371,36 @@ final class MannyRepository
     public function withMannyLock(int $id, callable $callback): mixed
     {
         return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1))->run(function () use ($id, $callback): mixed {
-            $sql = $this->taskJoinSql('m.id = :id');
-            if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $sql .= ' FOR UPDATE'; }
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute(['id' => $id]);
-            $row = $stmt->fetch();
-            if (!$row) { throw new \RuntimeException('Manny not found while acquiring task lock.'); }
-            return $callback($this->hydrate($row));
+            return $callback($this->lockForTask($id) ?? throw new \RuntimeException('Manny not found while acquiring task lock.'));
         });
+    }
+
+    public function lockForTask(int $id): ?Manny
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Task locks require a transaction.'); }
+        $sql = $this->taskJoinSql('m.id = :id');
+        if ($this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'sqlite') { $sql .= ' FOR UPDATE'; }
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+        return $row ? $this->hydrate($row) : null;
+    }
+
+    public function withMiningTransaction(callable $operation): mixed
+    {
+        return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1, readCommitted: true))->run($operation);
+    }
+
+    /** Admission serializes same-probe commitments only, never reserves source stock. */
+    public function lockMiningOrders(int $probeId, string $objectId): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Mining orders require a transaction.'); }
+        MineableObjectStockRepository::validateId($objectId);
+        $sql = 'INSERT INTO mining_order_locks(probe_id,object_id) VALUES(?,?)';
+        $sql .= $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' ON DUPLICATE KEY UPDATE probe_id=VALUES(probe_id)'
+            : ' ON CONFLICT(probe_id,object_id) DO UPDATE SET probe_id=excluded.probe_id';
+        $this->pdo->prepare($sql)->execute([$probeId, $objectId]);
     }
 
     public function nameExistsForProbe(int $probeId, string $name, ?int $exceptId = null): bool

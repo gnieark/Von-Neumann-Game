@@ -347,6 +347,17 @@ final class NeumannProbeRepository
         }
     }
 
+    /** Fuel is stored on the probe row; this local tank lock remains necessary. */
+    public function miningTankCapacity(int $probeId, float $maximum): float
+    {
+        $probe = (new Storage\StorageLockRepository($this->pdo))->lock('probe', $probeId);
+        if ($probe === null) { throw new \RuntimeException('Mining fuel destination disappeared.'); }
+        $reserved = (new Storage\StorageReservationRepository($this->pdo))->reservedProbeTank($probeId);
+        $free = max(0.0, $maximum - (float) $probe['deuterium_stock'])
+            / \VonNeumannGame\Domain\ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE - $reserved;
+        return max(0.0, floor(($free + 1.0e-10) * 10000) / 10000);
+    }
+
     public function adjustDeuteriumStock(int $probeId, float $stockPercent): float
     {
         $stockPercent = round($stockPercent, 4);

@@ -459,10 +459,10 @@ final class ProbeStorageService
             return round($result['accepted'] / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE, 4);
         }
 
-        $this->ensureProbeStorage($probe);
-        $accepted = $this->placeResourceAmount($probe, $type, $amount);
-
-        return $accepted;
+        return $this->containers->withPlacementLock($probe->id, function () use ($probe, $type, $amount): float {
+            $this->ensureProbeStorage($probe);
+            return $this->placeResourceAmount($probe, $type, $amount);
+        });
     }
 
     private function placeResourceAmount(NeumannProbe $probe, string $type, float $amount): float
@@ -701,6 +701,12 @@ final class ProbeStorageService
     }
 
     public function addItem(NeumannProbe $probe, string $type, string $name, float $containerSpace, array $metadata = [], ?string $uid = null): ProbeItem
+    {
+        return $this->containers->withPlacementLock($probe->id,
+            fn(): ProbeItem => $this->addItemLocked($probe, $type, $name, $containerSpace, $metadata, $uid));
+    }
+
+    private function addItemLocked(NeumannProbe $probe, string $type, string $name, float $containerSpace, array $metadata, ?string $uid): ProbeItem
     {
         $this->ensureProbeStorage($probe);
         $container = $this->placeUnit($probe, $type, $containerSpace)
@@ -1003,6 +1009,11 @@ final class ProbeStorageService
     public function lockMannyPlacement(NeumannProbe $probe): void
     {
         $this->containers->lockForMannyPlacement($probe->id);
+    }
+
+    public function miningTankCapacity(NeumannProbe $probe): float
+    {
+        return $this->probes->miningTankCapacity($probe->id, $this->maxDeuteriumPercent($probe));
     }
 
     public function placeMannyOnProbe(NeumannProbe $probe, Manny $manny): bool
@@ -1392,6 +1403,7 @@ final class ProbeStorageService
             throw new MannyActionException(422, 'invalid_cargo_reservation', 'The crafting output reservation is missing or invalid.');
         }
 
+        $this->containers->lockReservedOutput($probe->id, $reservationOwner->reservedStorageContainerId);
         $container = $this->containers->findByDatabaseIdForProbe($probe->id, $reservationOwner->reservedStorageContainerId)
             ?? throw new MannyActionException(422, 'invalid_cargo_reservation', 'The reserved storage container is unavailable.');
 

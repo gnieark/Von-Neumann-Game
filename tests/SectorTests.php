@@ -958,5 +958,6 @@ require __DIR__ . '/Support/MineableObjectStockRepositoryTests.php';
 require __DIR__ . '/Support/MineableSectorPublicationTests.php';
 require __DIR__ . '/Support/ForgottenMannyTests.php';
 require __DIR__ . '/Support/MineableLifecycleTests.php';
+require __DIR__ . '/Support/MiningAtomicTests.php';
 $test->printSummary();
 exit($test->getStatus());

@@ -6,12 +6,14 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- Stocks minables SQL, lot 4 : débit, livraison, état de Manny et événement scheduler atomiques, contrôle du bail et absence de double crédit après reprise. Livraison directe aux conteneurs détachés sous verrou de capacité (réservations comprises), sans sauvegarde de secteur ; verrous locaux au lancement/rappel et découvertes de caches en SQL. Le réservoir conserve la place réservée aux transferts. Contrat API inchangé (v148). L’enveloppe de sonde reste en place jusqu’au lot 4 bis.
 - Stocks minables SQL, lot 3 : motorisation et références actives, fusion/fragmentation, transit/capture/perte, destruction, sculpture, ravitaillement, renommage et inspection passent par des intentions de secteur publiées après commit. Les transformations utilisent les stocks courants sous verrou et préservent les cargaisons attachées ; les replays ne recréent pas les ressources. Le minage revalide la trajectoire lorsqu'un fichier de départ est en retard. Contrat public inchangé (v148).
 - Stocks minables SQL, lot 2 bis : les Mannies oubliées utilisent `mannies.is_forgotten` et leurs données SQL courantes. Observations et recherches par identifiant composent leur présence sans l'écrire dans les secteurs ; récupération et embarquement revalident l'état et la place sous verrous. Les Mannies abandonnées conservent leur format et leurs règles, avec publication durable après commit. Contrat API inchangé (v148).
 - Statistiques : comptage SQL des Mannies oubliées et extraction des requêtes dans `UniverseStatsRepository`, conformément à la garde d'architecture.
 
 ### Added
 
+- Migration additive des verrous locaux de lancement : `scripts/one-shot-scripts/migrate-mining-order-locks.php --database-config=PATH`, simulation par défaut, `--apply` sous maintenance. Aucune réservation de ressources ni conversion implicite ; lots 4 bis, 5, 6 et 7 requis avant déploiement global.
 - Conversion explicite des snapshots de trajectoires actives : `scripts/one-shot-scripts/migrate-asteroid-snapshot-descriptors.php`, simulation par défaut, `--apply --backup=NEW_FILE` puis `--verify`, sous maintenance après import des stocks. Les historiques terminaux restent inchangés. Les lots 4, 4 bis, 5, 6 et 7 restent requis avant déploiement de la migration globale.
 - Conversion explicite `scripts/one-shot-scripts/migrate-forgotten-mannies.php --database-config=PATH --universe-path=PATH`, simulation en lecture seule par défaut ; application sous maintenance avec `--apply --manifest=PATH`. Ajout de colonne, rapprochements, sauvegarde des fichiers dans le manifeste et reprise sans recrédit de cargaison. Les divergences/orphelines exigent une résolution documentée ; les publications oubliées en attente bloquent la conversion. Étape intermédiaire : les lots 4 à 7 (dont 4 bis) restent nécessaires avant déploiement global ; aucune application en production.
 

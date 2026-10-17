@@ -55,6 +55,53 @@ final class DetachedStorageContainerRepository
         return is_array($row) ? $this->hydrateRows([$row])[0] : null;
     }
 
+    /** Lock the inventory root before reading shared capacity, never a sector. */
+    public function lockMiningDestination(SectorCoordinates $sector, string $objectId): float
+    {
+        $row = (new Storage\StorageLockRepository($this->pdo))->lock('detached', $objectId);
+        if ($row === null || $row['status'] !== 'available'
+            || (int) $row['sector_x'] !== $sector->getX() || (int) $row['sector_y'] !== $sector->getY() || (int) $row['sector_z'] !== $sector->getZ()) {
+            throw new \VonNeumannGame\Service\MannyActionException(404, 'detached_container_not_found', 'Detached storage container not found.');
+        }
+        if (!in_array($row['mode'], [SectorDetachedContainer::MODE_DRIFTING, SectorDetachedContainer::MODE_HIDDEN_ON_ASTEROID, SectorDetachedContainer::MODE_HIDDEN_ON_DORMANT_CONSTRUCT], true)) {
+            throw new \VonNeumannGame\Service\MannyActionException(422, 'invalid_storage_container', 'This detached container cannot receive mined resources.');
+        }
+        // Current reads are required even if this transaction already read a task
+        // before waiting for another miner/transfer to release the inventory root.
+        $used = 0.0;
+        foreach ([
+            'SELECT amount FROM detached_storage_container_resources WHERE container_object_id=?',
+            'SELECT container_space FROM detached_storage_container_items WHERE container_object_id=? AND is_backing_item=0',
+            'SELECT container_space FROM detached_storage_container_mannies WHERE container_object_id=?',
+            "SELECT amount FROM sector_storage_capacity_reservations WHERE inventory_kind='detached' AND inventory_id=?",
+        ] as $sql) {
+            $statement = $this->pdo->prepare($sql . $this->currentReadSuffix());
+            $statement->execute([$objectId]);
+            $used += array_sum($statement->fetchAll(PDO::FETCH_COLUMN));
+        }
+        return round(max(0.0, (float) $row['capacity'] - $used), 4);
+    }
+
+    /** Increment only resources; do not replace inventory children or recreate a vanished root. */
+    public function creditMiningDestination(SectorCoordinates $sector, string $objectId, array $amounts): void
+    {
+        $amounts = \VonNeumannGame\Domain\MineableResourceAmounts::normalize($amounts);
+        if ($amounts['deuterium'] > 0 || round(array_sum($amounts), 4) > $this->lockMiningDestination($sector, $objectId)) {
+            throw new \RuntimeException('Mining credit exceeds detached destination capacity.');
+        }
+        $sql = 'INSERT INTO detached_storage_container_resources(container_object_id,resource_type,amount) VALUES(?,?,?)';
+        $sql .= $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' ON DUPLICATE KEY UPDATE amount=ROUND(amount+VALUES(amount),4)'
+            : ' ON CONFLICT(container_object_id,resource_type) DO UPDATE SET amount=ROUND(amount+excluded.amount,4)';
+        $statement = $this->pdo->prepare($sql);
+        foreach ($amounts as $type => $amount) {
+            if ($amount > 0) { $statement->execute([$objectId, $type, $amount]); }
+        }
+        $statement = $this->pdo->prepare('UPDATE detached_storage_containers SET storage_version=storage_version+1 WHERE object_id=?');
+        $statement->execute([$objectId]);
+        if ($statement->rowCount() !== 1) { throw new \RuntimeException('Mining destination disappeared.'); }
+    }
+
     public function objectIdExistsOutsideSector(string $objectId, SectorCoordinates $sector): bool
     {
         $stmt = $this->pdo->prepare(
@@ -163,6 +210,16 @@ final class DetachedStorageContainerRepository
         $query = $this->pdo->prepare('SELECT 1 FROM detached_storage_container_discoveries WHERE container_object_id=? AND player_id=?');
         $query->execute([$objectId, $playerId]);
         return $query->fetchColumn() !== false;
+    }
+
+    public function recordDiscovery(string $objectId, int $playerId): void
+    {
+        if ((new Storage\StorageLockRepository($this->pdo))->lock('detached', $objectId) === null) { return; }
+        $sql = 'INSERT INTO detached_storage_container_discoveries(container_object_id,player_id,discovered_at) VALUES(?,?,?)';
+        $sql .= $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ' ON DUPLICATE KEY UPDATE player_id=VALUES(player_id)'
+            : ' ON CONFLICT(container_object_id,player_id) DO NOTHING';
+        $this->pdo->prepare($sql)->execute([$objectId, $playerId, gmdate('c')]);
     }
 
     public function excludedResourceTypes(string $objectId): array

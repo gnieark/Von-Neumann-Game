@@ -169,6 +169,9 @@ final class SchedulerService
             throw new \RuntimeException('Manny scheduler is unavailable.');
         }
 
+        $miningResult = $this->mannyService->processScheduledMiningTask($event);
+        if ($miningResult !== null) { return $miningResult; }
+
         $manny = $this->mannyService->refreshScheduledMannyTask($event);
         if ($manny === null || $manny->currentTask === null || $manny->taskScheduledEventId !== $event->id) {
             return true;

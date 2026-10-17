@@ -223,6 +223,7 @@ try{
     require __DIR__ . '/Support/DetachedContainerMannyConcurrencyTests.php';
     require __DIR__ . '/Support/MineableObjectStockConcurrencyTests.php';
     require __DIR__ . '/Support/MineableLifecycleConcurrencyTests.php';
+    require __DIR__ . '/Support/MiningAtomicConcurrencyTests.php';
     require __DIR__ . '/Support/ForgottenMannyConcurrencyTests.php';
 }finally{
     // Remove only tables bearing this run's unpredictable prefix.

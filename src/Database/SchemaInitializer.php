@@ -1052,9 +1052,23 @@ final class SchemaInitializer
             )",
         ];
         array_push($statements, ...$this->mineableObjectStockStatements());
+        array_push($statements, ...$this->miningOrderLockStatements());
         return $this->driver === 'mysql'
             ? array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements)
             : $statements;
+    }
+
+    /** Also used by the explicit schema migration; never imports or repairs existing data. */
+    public function miningOrderLockStatements(): array
+    {
+        $identity = $this->driver === 'mysql' ? 'VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin' : 'TEXT COLLATE BINARY';
+        $sql = "CREATE TABLE IF NOT EXISTS mining_order_locks (
+            probe_id INTEGER NOT NULL,
+            object_id $identity NOT NULL,
+            PRIMARY KEY(probe_id, object_id),
+            FOREIGN KEY(probe_id) REFERENCES neumann_probes(id) ON DELETE CASCADE
+        )";
+        return [$this->driver === 'mysql' ? $this->withMysqlEngine($sql) : $sql];
     }
 
     /** Also used by the explicit schema migration; never imports or repairs existing data. */
