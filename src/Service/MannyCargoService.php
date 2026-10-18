@@ -254,32 +254,29 @@ final class MannyCargoService
             return [];
         }
 
-        $sector = $this->sectors->getOrCreateSector($manny->sector);
         $dropped = [];
-        foreach ($ingredients as $item) {
-            $type = (string) ($item['type'] ?? '');
-            if ($type === '') {
-                continue;
+        $this->sectors->changeObjectsAfterCommit($manny->sector, function (SectorContent $sector) use ($ingredients, &$dropped): void {
+            foreach ($ingredients as $item) {
+                $type = (string) ($item['type'] ?? '');
+                if ($type === '') {
+                    continue;
+                }
+
+                $name = (string) ($item['name'] ?? $this->itemDisplayName($type));
+                $containerSpace = round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4);
+                $drifting = $this->addDriftingItemToSector($sector, $type, $name, $containerSpace, 1);
+                $dropped[] = [
+                    'type' => 'drifting_item',
+                    'itemType' => $type,
+                    'name' => $drifting->getName(),
+                    'quantity' => 1,
+                    'driftingQuantity' => $drifting->getQuantity(),
+                    'objectId' => $drifting->getId(),
+                    'containerSpace' => $drifting->getContainerSpace(),
+                    'capacityUnit' => $drifting->getCapacityUnit(),
+                ];
             }
-
-            $name = (string) ($item['name'] ?? $this->itemDisplayName($type));
-            $containerSpace = round(max(0.0, (float) ($item['containerSpace'] ?? 0.0)), 4);
-            $drifting = $this->addDriftingItemToSector($sector, $type, $name, $containerSpace, 1);
-            $dropped[] = [
-                'type' => 'drifting_item',
-                'itemType' => $type,
-                'name' => $drifting->getName(),
-                'quantity' => 1,
-                'driftingQuantity' => $drifting->getQuantity(),
-                'objectId' => $drifting->getId(),
-                'containerSpace' => $drifting->getContainerSpace(),
-                'capacityUnit' => $drifting->getCapacityUnit(),
-            ];
-        }
-
-        if ($dropped !== []) {
-            $this->sectors->saveSector($sector);
-        }
+        });
 
         return $dropped;
     }

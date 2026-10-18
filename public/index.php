@@ -21,11 +21,13 @@ $factory = new AppFactory($projectRoot);
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $path = $_SERVER['REQUEST_URI'] ?? '/';
 $routePath = (string) (parse_url($path, PHP_URL_PATH) ?: '/');
+$requestPdo = $factory->pdo();
+(new \VonNeumannGame\Repository\StorageMigrationRepository($requestPdo))->assertReady();
 
 
 // Handle API requests 
 if (str_starts_with($routePath, '/api/')) {
-    $apiPdo = $factory->pdo();
+    $apiPdo = $requestPdo;
     refreshRememberedSessionCookie($factory, $apiPdo);
     $kernel = $factory->apiKernel($apiPdo);
     $headers = function_exists('getallheaders') ? getallheaders() : [];
@@ -119,7 +121,7 @@ if ($routePath !== '/i18n' && isset($_GET['lang']) && in_array((string) $_GET['l
     return;
 }
 
-refreshRememberedSessionCookie($factory);
+refreshRememberedSessionCookie($factory, $requestPdo);
 
 $availableroutes = [
     'home' => [

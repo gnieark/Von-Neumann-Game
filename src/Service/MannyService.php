@@ -1502,10 +1502,26 @@ final class MannyService implements MannyTaskRuntime
         );
     }
 
-    private function recallMannyLocked(NeumannProbe $probe, string $uid): Manny
+    /** Explicit maintenance entry: caller locks the failed event and owns the receipt transaction. */
+    public function recallFailedTaskForMigration(NeumannProbe $probe, Manny $manny, int $failedEventId): Manny
+    {
+        $event = $this->scheduledEvents?->findById($failedEventId);
+        if ($event === null || $event->status !== 'failed' || $event->entityType !== 'manny' || $event->entityId !== $manny->id
+            || $manny->taskScheduledEventId !== $failedEventId) { throw new \LogicException('Maintenance recall requires the current failed Manny task.'); }
+        $this->mannies->loadConsumedItems($manny);
+        $manny->taskScheduledEventId = null; // A return must get a new event, never reuse the failed delivery.
+        $result = $this->recallMannyLocked($probe, $manny->uid, $manny);
+        if ($result->currentTask !== null && !in_array($result->currentTask, [Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
+            throw new \RuntimeException('Failed task could not be cancelled by the business recall.');
+        }
+        $this->mannies->save($result);
+        return $result;
+    }
+
+    private function recallMannyLocked(NeumannProbe $probe, string $uid, ?Manny $failedManny = null): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $manny = $failedManny ?? $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
         if (!$manny->isInSameSectorAs($probe) && $this->canRecallRemoteMannyViaScut($probe, $manny)) {
             return $this->abandonRemoteMannyTask($manny);
         }

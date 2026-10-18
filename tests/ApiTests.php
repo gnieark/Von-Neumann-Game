@@ -8911,7 +8911,7 @@ if ($createdProbe !== null) {
     $currentConstructScan = $kernel->handle('GET', '/api/probe/sector', $headers);
     $currentConstructObjects = array_values(array_filter(
         $currentConstructScan->body['sector']['objects'] ?? [],
-        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct',
+        static fn(array $object): bool => ($object['type'] ?? null) === 'dormant_construct' && ($object['id'] ?? null) === 'api-current-dormant-construct',
     ));
     $test->assertEquals(1, count($currentConstructObjects), 'GET /api/probe/sector exposes dormant constructs in detailed scans');
     $test->assertEquals('Dormant construct', $currentConstructObjects[0]['name'] ?? null, 'detailed dormant construct exposes its public name');

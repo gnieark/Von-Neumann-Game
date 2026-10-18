@@ -1,6 +1,6 @@
 # Stocks minables SQL — inventaire du lot 0
 
-Date : 16 octobre 2026. Mise à jour : 17 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’au lot 3 ; aucune bascule de production n’a été exécutée. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
+Date : 16 octobre 2026. Mise à jour : 18 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’au lot 6 ; aucune bascule de production n’a été exécutée. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
 
 ## Périmètre et écarts constatés
 
@@ -356,3 +356,89 @@ Le DDL est déclaré dans `SchemaInitializer`. La simulation n'ouvre aucune conn
 Validation : **647 tests moteur**, **4 558 tests API**, suites de concurrence SQLite et MariaDB réussies. Tests ajoutés : rollback après débit, conflit à l'admission et au commit, six conflits successifs et alerte unique, reprise avec conservation exacte, remise à zéro après report métier, erreur permanente, disparition de destination après conflit, expiration métier, ancien report après nouveau claim/libération, transitions périmées du même worker, fermeture d'admission, exclusion des handlers non prouvés, migration simulée/partielle/répétée, et conflits serveur réels 1205/1213. La syntaxe PHP et `git diff --check` sont également vérifiés.
 
 Logs : `/tmp/vng-lot5-sector.log`, `/tmp/vng-lot5-api.log`, `/tmp/vng-lot5-concurrency-sqlite.log`, `/tmp/vng-lot5-concurrency-mariadb.log`. Aucun changement du contrat API (**v148**), aucune écriture en production. Branche `removestoragesfromjsons` ; **lots 6 et 7 et conversion explicite des données encore nécessaires avant déploiement global**.
+
+
+## Lot 6 — Migration explicite et répétition complète, 18 octobre
+
+### Outils livrés
+
+La procédure détaillée figure dans [le guide de maintenance](mineable-object-stock-migration-runbook.md). `migrate-mineable-object-stocks.php` propose la simulation en lecture seule, l’application/reprise sous maintenance, la vérification indépendante et la restauration coordonnée SQL/secteurs. L’export assisté `export-mineable-maintenance-copy.sh` utilise le dump transactionnel et rsync pendant le même arrêt des écritures. Le client MariaDB utilise explicitement `--skip-ssl` pour la connexion interne au serveur fourni, qui ne propose pas TLS ; SSH sert au transfert des fichiers.
+
+Le manifeste privé conserve la sauvegarde complète, le couple base/univers, les révisions et empreintes du code exécuté, les attributions d’IDs par occurrence, les valeurs importées, les références modifiées, les normalisations, les hashes de fichiers et les reçus des rappels. Les identités historiques récupérables sont réservées sans créer de stock. Une référence ambiguë exige une résolution explicite et justifiée ; aucun remplacement textuel global n’est effectué. Les snapshots terminaux restent historiques.
+
+La garde SQL bloque les entrées web/API/scheduler pendant une conversion incomplète. Elle ne remplace pas l’arrêt préalable de tous les writers. Les anciennes intentions sont drainées avec leur format explicite avant import ; les nouvelles publications utilisent le format canonique. Cette adaptation est confinée à l’outil de migration, sans fallback du moteur.
+
+Les événements Manny en échec sont annulés avec rappel métier de la mission encore associée, sans exécuter une récolte échue. Le reçu et les mutations SQL sont commis ensemble. La restitution des ingrédients d’assemblage passe désormais par une intention durable après commit ; les secteurs modifiés par les rappels sont contrôlés par rejeu des seules intentions attendues. Les secteurs nécessaires doivent déjà exister : la maintenance ne génère pas de secteur pour masquer une absence.
+
+### Copie synchronisée et résultats
+
+L’utilisateur a confirmé que `/home/gnieark/neumannprod.sql` et `/home/gnieark/copieuniverseprod` proviennent du même arrêt des écritures. Cette paire remplace, pour la répétition, la paire non synchronisée du lot 0 ; les chiffres historiques ci-dessus restent ceux de cet audit initial. Le dump a été importé dans une instance MariaDB **locale isolée**, et les secteurs dupliqués dans `var/lot6-rehearsal/universe`. Aucune connexion de production n’a été utilisée pour appliquer la migration.
+
+| Mesure | Copie complète du lot 6 |
+| --- | ---: |
+| Tables SQL sauvegardées | 72 |
+| Lignes SQL sauvegardées | 4 096 793 |
+| Fichiers de secteurs contrôlés | 208 241 |
+| Sources minables importées | 84 540 |
+| Astéroïdes, dont épuisés | 84 538, dont 94 |
+| Épaves de vaisseau-mère | 2 |
+| Trajectoires en traversée | 19 |
+| Identités courantes/historiques réservées | 93 792 |
+| Lignes SQL de références/snapshots converties | 527 |
+| Fichiers convertis avant retrait des Mannies oubliées | 44 260 |
+| Mannies oubliées migrées, fichiers concernés | 45, dans 24 fichiers |
+| Présences de Mannies abandonnées conservées en JSON | 24 |
+| Événements Manny en échec traités | 1 |
+| Doublons d’ID ou résolutions manuelles nécessaires | 0 |
+
+Les **72 normalisations** reprennent la décision validée : 65 vecteurs absents deviennent entièrement nuls ; 7 vecteurs incomplets reçoivent `ice = 0`, en conservant leurs **86 512 métaux**. Aucun montant n’est reconstruit depuis la masse. Les planètes, le moissonnage Others et les constructs hors périmètre gardent leurs stocks et leurs protections.
+
+Le plan recense **7 204 références actives sans source minable locale correspondante**. Ce décompte inclut les cibles exclues du périmètre, déplacées ou disparues ; il ne signifie pas 7 204 astéroïdes à recréer. Ces références ne produisent aucune nouvelle ligne de stock. Les ambiguïtés de doublons et contradictions de trajectoires restent bloquantes.
+
+L’événement en échec **1934570**, associé à la Manny **3496**, concernait `dropping_storage_container`. Le rappel métier a annulé cette action et libéré ses engagements ; la Manny termine sans tâche active. Aucun événement de trajet retour n’était nécessaire dans ce cas (`taskAfter = null`, `returnEventId = null`). Les scénarios de rappel avec déplacement et restitution d’ingrédients sont couverts par les fixtures dédiées.
+
+Les montants sont vérifiés **source par source**, après normalisation à quatre décimales, puis agrégés :
+
+| Ressource | Total conservé |
+| --- | ---: |
+| Deutérium | 33 637 782,6613 |
+| Métaux | 551 220 447,9975 |
+| Glace | 129 416 365,4869 |
+| Composés carbonés | 124 017 327,7215 |
+
+### Interruptions, reprise et restauration
+
+Deux arrêts volontaires ont interrompu la migration complète : après le premier lot de **200 stocks SQL**, puis après la première publication de descripteur JSON. Les reprises ont utilisé le même manifeste, sans réattribuer les identités ni écraser les stocks. L’application finale indique `complete: true`. Une vérification indépendante, exécutée après redémarrage de MariaDB, confirme les stocks, les références, les Mannies et les hashes des **208 241 fichiers**.
+
+La commande de restauration complète a réussi en **367,719 secondes**, avec un pic PHP de **85 987 328 octets** (82 Mio). La comparaison indépendante a ensuite confirmé **les 4 096 793 lignes et le DDL des 72 tables à l’identique**, ainsi que les hashes des **208 241 fichiers restaurés**, égaux à ceux de la sauvegarde et de la copie source. Tous ces secteurs ont été chargés avec le code antérieur aux migrations, révision **`530e36a`**, sans erreur. La copie source est restée inchangée. Ce contrôle exhaustif a duré **207,272 secondes**, avec un pic de **977 268 736 octets** (932 Mio), dû notamment à la comparaison des tables volumineuses.
+
+La paire de travail locale est laissée **restaurée dans son format initial**, et non migrée ; `applied.json` et `verified.json` prouvent l’état migré précédant cette restauration. `restored.json` et `restoration-proof.json` prouvent le retour complet. Conserver ces artefacts ; une nouvelle répétition doit utiliser un nouveau répertoire de manifeste.
+
+### Coûts mesurés et limites
+
+| Opération | Durée observée |
+| --- | ---: |
+| Sauvegarde SQL/secteurs groupée | 172,258 s |
+| Préparation du plan complet | environ 340 s |
+| Reprise de l’import des stocks après les 200 premiers | 72,989 s |
+| Conversion des références SQL | 0,143 s |
+| Reprise des descripteurs après le premier fichier | 254,385 s |
+| Conversion des Mannies oubliées | 57,481 s |
+| Annulation/rappel de la Manny concernée | 0,074 s |
+| Vérification indépendante après redémarrage | 84,514 s |
+| Restauration SQL et secteurs | 367,719 s |
+| Comparaison exhaustive après restauration et lecture par l’ancien code | 207,272 s |
+
+Les trois exécutions avec interruptions totalisent environ **18 minutes de traitement**, avec vérifications répétées ; ce n’est pas une estimation garantie de la fenêtre de production. Le pic PHP de l’application est de **662 720 512 octets** (632 Mio), celui de la vérification de **430 968 832 octets** (411 Mio). La sauvegarde canonique SQL/secteurs et ses métadonnées occupent **1 390 893 158 octets** ; prévoir aussi le dump source, le clone de travail, les fichiers préparés et l’espace de restauration de la base. Un ancien répertoire de sauvegarde partielle de cette répétition est distinct et n’entre pas dans cette mesure.
+
+La répétition utilise MariaDB 11.8 local avec données sur `/tmp`, tandis que les tests de concurrence de référence utilisent MariaDB 10.11 de développement. Un premier passage de concurrence sur l’instance 11.8 a rencontré une erreur serveur 123 (« record changed ») dans le scénario des workers terminaux ; la suite finale sur MariaDB 10.11 est entièrement passée. Les mesures de cette VM ne caractérisent ni les percentiles de minage en charge ni les performances du stockage de production. Ces observations et la surveillance de la bascule restent à effectuer au lot 7.
+
+### Validation et preuves
+
+- **719 tests moteur**, **4 558 tests API**, **245 tests des scripts Others**, **150 assertions de concurrence SQLite** et **190 assertions de concurrence MariaDB** réussis.
+- Fixtures de migration : doublons inter/intra-secteur et références ambiguës, IDs motorisés, transit, stocks absents/épuisés, ressources imbriquées, constructs exclus, intentions interrompues entre fichier et acquittement SQL, reprise des rappels après commit, rollback d’une restitution d’assemblage, mutation non prévue, mauvais couple base/univers, sauvegarde corrompue, restauration des flottants et des séquences SQLite.
+- Syntaxe des 18 fichiers PHP concernés et du script shell validée ; `git diff --check` passé. Le test API des constructs cible maintenant l’ID de sa fixture, sans supposer l’absence de constructs générés aléatoirement.
+
+Les artefacts complets restent privés dans `var/lot6-rehearsal/` : `dry-run.json`, `job/`, `interrupt-stocks.json`, `interrupt-descriptors.json`, `applied.json`, `verified.json`, `restored.json`, `restoration-proof.php`, `restoration-proof.json` et son journal. Les journaux de tests sont `/tmp/vng-lot6-sector.log`, `/tmp/vng-lot6-api.log`, `/tmp/vng-lot6-others.log` et `/tmp/vng-lot6-concurrency-{sqlite,mariadb}-final.log`. Aucun secret ni dump n’est ajouté au dépôt.
+
+Contrat API inchangé (**v148**), branche `removestoragesfromjsons`, aucun commit/push effectué pour ce lot. **Lot 6 terminé sur copie complète. Le lot 7, la migration effective et la surveillance de production restent à réaliser avant ouverture du nouveau format.**

@@ -189,7 +189,7 @@ final class MineableObjectStockAudit
             $active = in_array($row['status'], AsteroidTrajectory::ACTIVE_STATUSES, true);
             $sector = $this->coordinates($row, 'current_sector_', $location);
             $this->count('trajectories:' . $row['status']);
-            $this->references(['asteroidId' => $row['asteroid_id'], 'targetObjectId' => $row['target_object_id']], $location, $sector, $active);
+            $this->references(['asteroid_id' => $row['asteroid_id'], 'target_object_id' => $row['target_object_id']], $location, $sector, $active);
             $snapshot = $this->decode($row['asteroid_snapshot_json'], $location);
             if ($snapshot === null) { continue; }
             if (($snapshot['id'] ?? null) !== $row['asteroid_id'] || ($snapshot['type'] ?? null) !== 'asteroid') {
@@ -211,7 +211,7 @@ final class MineableObjectStockAudit
             $location = 'sql:sector_effects/' . $row['id'];
             $active = $row['status'] === 'pending';
             $sector = $this->coordinates($row, 'sector_', $location);
-            $this->references(['objectId' => $row['object_id']], $location, $sector, $active);
+            $this->references(['object_id' => $row['object_id']], $location, $sector, $active);
             $payload = $this->decode($row['payload_json'], $location);
             if ($payload === null) { continue; }
             $this->references($payload, $location . '/payload_json', $sector, $active);
@@ -232,7 +232,8 @@ final class MineableObjectStockAudit
         foreach (['manny_tasks', 'scheduled_events', 'others_actions', 'others_auxiliaries', 'sector_storage_transfers', 'detached_storage_containers', 'probe_damage_warnings'] as $table) {
             foreach ($this->rows($pdo, $table, $table === 'detached_storage_containers' ? 'object_id' : 'id') as $row) {
                 $location = 'sql:' . $table . '/' . ($row['id'] ?? $row['object_id']);
-                $active = !isset($row['status']) || in_array($row['status'], ['pending', 'running', 'failed', 'queued', 'cancel_requested', 'available', 'reserved'], true);
+                $active = !isset($row['status']) || !in_array($row['status'], ['done', 'completed', 'cancelled', 'succeeded', 'destroyed', 'applied', 'lost'], true);
+                if ($table === 'others_auxiliaries') { $active = $row['destroyed_at'] === null; }
                 $sector = isset($row['sector_x']) ? $this->coordinates($row, 'sector_', $location) : null;
                 $this->references($row, $location, $sector, $active);
                 foreach (['payload_json', 'manifest_json', 'result_json'] as $column) {

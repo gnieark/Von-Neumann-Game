@@ -85,7 +85,8 @@ final class AppFactory
             new \VonNeumannGame\Repository\Storage\InventoryTransferRepositoryFactory($pdo), new \VonNeumannGame\Repository\GerminationDepotRepository($pdo),
             new \VonNeumannGame\Repository\DetachedStorageContainerRepository($pdo), $containers, $mannies, $probes, $storage,
         );
-        return new MannyService($mannies, $probes, $sectors, $items, $storage, $config, improvements: $improvements, scheduledEvents: $events, sectorStorageTransfers: $transfers);
+        $scut = new ScutNetworkService(new ScutRelayRepository($pdo), new ScutNetworkRepository($pdo), $probes);
+        return new MannyService($mannies, $probes, $sectors, $items, $storage, $config, scut: $scut, improvements: $improvements, scheduledEvents: $events, sectorStorageTransfers: $transfers);
     }
 
     public function databaseFactory(?string $configPath = null): DatabaseConnectionFactory
@@ -110,6 +111,7 @@ final class AppFactory
     public function apiKernel(?PDO $pdo = null): ApiKernel
     {
         $pdo ??= $this->pdo();
+        (new \VonNeumannGame\Repository\StorageMigrationRepository($pdo))->assertReady();
         $appConfig = $this->appConfig();
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();
@@ -178,6 +180,7 @@ final class AppFactory
     public function schedulerService(?PDO $pdo = null): SchedulerService
     {
         $pdo ??= $this->pdo();
+        (new \VonNeumannGame\Repository\StorageMigrationRepository($pdo))->assertReady();
         $appConfig = $this->appConfig();
         $gameplayConfig = $this->gameplayConfig();
         $universeConfig = $this->universeConfig();

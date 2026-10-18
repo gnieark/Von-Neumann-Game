@@ -1061,12 +1061,21 @@ final class SchemaInitializer
         array_push($statements, ...$this->mineableObjectStockStatements());
         array_push($statements, ...$this->miningOrderLockStatements());
         array_push($statements, ...$this->probeOperationStatements());
+        array_push($statements, ...$this->storageMigrationStatements());
         return $this->driver === 'mysql'
             ? array_map(fn(string $statement): string => $this->withMysqlEngine($statement), $statements)
             : $statements;
     }
 
-    /** Tombstones deliberately survive deletion of probes and players. */
+    /** Maintenance gate and durable receipts, including events subsequently deleted. */
+    public function storageMigrationStatements(): array
+    {
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $statements = ["CREATE TABLE IF NOT EXISTS storage_migrations (name $text PRIMARY KEY, migration_id $text NOT NULL, state $text NOT NULL, plan_hash $text NULL)",
+            "CREATE TABLE IF NOT EXISTS storage_migration_recalls (event_id INTEGER PRIMARY KEY, migration_id $text NOT NULL, result_json TEXT NOT NULL)"];
+        return $this->driver === 'mysql' ? array_map($this->withMysqlEngine(...), $statements) : $statements;
+    }
+
     public function probeOperationStatements(): array
     {
         $text = $this->driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
