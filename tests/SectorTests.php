@@ -960,5 +960,6 @@ require __DIR__ . '/Support/ForgottenMannyTests.php';
 require __DIR__ . '/Support/MineableLifecycleTests.php';
 require __DIR__ . '/Support/MiningAtomicTests.php';
 require __DIR__ . '/Support/ProbeLossTests.php';
+require __DIR__ . '/Support/MiningRetryTests.php';
 $test->printSummary();
 exit($test->getStatus());

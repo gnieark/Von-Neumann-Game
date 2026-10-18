@@ -19,9 +19,13 @@ final class SchemaInitializer
         }
     }
 
-    /**
-     * @return array<string>
-     */
+    /** Also used by the explicit migration; never ALTER an existing database at runtime. */
+    public function schedulerConflictColumns(): array
+    {
+        $text = $this->driver === 'mysql' ? 'VARCHAR(255) NULL' : 'TEXT NULL';
+        return ['conflict_count' => 'INTEGER NOT NULL DEFAULT 0', 'conflict_started_at' => $text, 'conflict_alerted_at' => $text];
+    }
+
     private function statements(): array
     {
         $id = $this->driver === 'mysql' ? 'INT AUTO_INCREMENT PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTOINCREMENT';
@@ -479,6 +483,9 @@ final class SchemaInitializer
                 status $text NOT NULL,
                 payload_json TEXT NOT NULL,
                 attempts INTEGER NOT NULL DEFAULT 0,
+                conflict_count INTEGER NOT NULL DEFAULT 0,
+                conflict_started_at $nullableText,
+                conflict_alerted_at $nullableText,
                 locked_at $nullableText,
                 locked_by $nullableText,
                 processed_at $nullableText,

@@ -21,5 +21,8 @@ final class ScheduledEvent
         public ?string $lastError,
         public readonly string $createdAt,
         public string $updatedAt,
+        public int $conflictCount = 0,
+        public ?string $conflictStartedAt = null,
+        public ?string $conflictAlertedAt = null,
     ) {}
 }

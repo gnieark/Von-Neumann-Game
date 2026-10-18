@@ -4,5 +4,7 @@
   "sessionTtlDays": 7,
   "schedulerProcessLimit": 100,
   "schedulerLeaseSeconds": 3600,
-  "schedulerRecoveryIntervalSeconds": 60
+  "schedulerRecoveryIntervalSeconds": 60,
+  "schedulerMiningRetryDelays": [1, 5, 15, 60, 300],
+  "schedulerMiningConflictAlertSeconds": 900
 }

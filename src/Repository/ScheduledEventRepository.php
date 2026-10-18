@@ -113,12 +113,65 @@ final class ScheduledEventRepository
         return is_numeric($target) && (int) $target > 0 ? (int) $target : null;
     }
 
-    public function withAdmission(ScheduledEvent $event, callable $operation): mixed
+    public function withAdmission(ScheduledEvent $event, callable $operation, ?array &$timings = null): mixed
     {
         // Movement/storage-break handlers prepare sectors before owning their protected transaction.
         if ($event->entityType !== 'manny') { return $operation(); }
         $ids = $this->probeIdsFor($event);
-        return $ids === [] ? $operation() : (new ProbeOperationRepository($this->pdo))->run($ids, $operation);
+        return $ids === [] ? $operation() : (new ProbeOperationRepository($this->pdo))->run($ids, $operation, $timings);
+    }
+
+    public function databaseDriver(): string { return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME); }
+
+    /** Bounded diagnostic context and eligibility before admission; execution revalidates the task. */
+    public function miningContext(ScheduledEvent $event): ?array
+    {
+        if ($event->type !== 'manny.task' || $event->entityType !== 'manny') { return null; }
+        $stmt = $this->pdo->prepare("SELECT mt.id AS task_id, m.probe_id, m.uid AS manny, mt.object_id
+            FROM manny_tasks mt JOIN mannies m ON m.id=mt.manny_id
+            WHERE mt.scheduled_event_id=? AND mt.manny_id=? AND mt.task_type='mining' AND m.probe_id IS NOT NULL");
+        $stmt->execute([$event->id, $event->entityId]);
+        return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** The claim rolled back with mining. Never reclaim/overwrite a newer worker's event. */
+    public function deferMiningConflict(ScheduledEvent $before, array $context, array $conflict, \VonNeumannGame\Database\MiningRetryPolicy $policy): ?array
+    {
+        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback mining before reporting a conflict.'); }
+        $now = time();
+        $count = $before->conflictCount + 1;
+        $since = $before->conflictStartedAt ?? gmdate('c', $now);
+        $age = max(0, $now - (new \DateTimeImmutable($since))->getTimestamp());
+        $alert = $before->conflictAlertedAt === null && $age >= $policy->alertAfterSeconds;
+        $delay = $policy->delay($count);
+        $diagnostic = $conflict + [
+            'event_id' => $before->id, 'manny' => $context['manny'], 'object_id' => $context['object_id'],
+            'probe_id' => (int) $context['probe_id'], 'conflict_count' => $count,
+            'conflict_age_seconds' => $age, 'retry_delay_seconds' => $delay, 'alert' => $alert,
+        ];
+        $stmt = $this->pdo->prepare("UPDATE scheduled_events SET run_at=?, conflict_count=?, conflict_started_at=?,
+            conflict_alerted_at=?, last_error=?, updated_at=?
+            WHERE id=? AND status='pending' AND attempts=? AND conflict_count=? AND run_at=?
+            AND EXISTS (SELECT 1 FROM manny_tasks mt JOIN mannies m ON m.id=mt.manny_id
+                JOIN probe_operation_gates g ON g.probe_id=m.probe_id AND g.closed=0
+                WHERE mt.id=? AND mt.scheduled_event_id=scheduled_events.id AND mt.task_type='mining' AND m.probe_id=?)");
+        $stmt->execute([
+            gmdate('c', $now + $delay), $count, $since, $alert ? gmdate('c', $now) : $before->conflictAlertedAt,
+            json_encode($diagnostic, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), gmdate('c', $now),
+            $before->id, $before->attempts, $before->conflictCount, $before->runAt, $context['task_id'], $context['probe_id'],
+        ]);
+        return $stmt->rowCount() === 1 ? $diagnostic : null;
+    }
+
+    public function failRolledBackMining(ScheduledEvent $before, \Throwable $error): bool
+    {
+        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback mining before reporting failure.'); }
+        $stmt = $this->pdo->prepare("UPDATE scheduled_events SET status='failed', processed_at=?, last_error=?, updated_at=?
+            WHERE id=? AND status='pending' AND attempts=? AND conflict_count=? AND run_at=?");
+        // Error class and business code suffice; raw PDO messages can contain SQL and bound values.
+        $message = $error instanceof \VonNeumannGame\Service\MannyActionException ? $error->errorCode : get_class($error);
+        $stmt->execute([gmdate('c'), $message, gmdate('c'), $before->id, $before->attempts, $before->conflictCount, $before->runAt]);
+        return $stmt->rowCount() === 1;
     }
 
     public function claim(ScheduledEvent $event): ?ScheduledEvent
@@ -156,10 +209,10 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events SET status = 'done', processed_at = :processed_at,
-             locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = :updated_at
-             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+             locked_at = NULL, locked_by = NULL, last_error = NULL, conflict_count = 0, conflict_started_at = NULL, conflict_alerted_at = NULL, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by AND attempts = :attempts"
         );
-        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'processed_at' => $now, 'updated_at' => $now]);
+        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'attempts' => $event->attempts, 'processed_at' => $now, 'updated_at' => $now]);
         if ($stmt->rowCount() !== 1) {
             $current = $this->findById($event->id);
             // Some terminal handlers complete the linked event themselves or
@@ -189,7 +242,7 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'done', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, last_error = NULL, updated_at = :updated_at
+             SET status = 'done', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, last_error = NULL, conflict_count = 0, conflict_started_at = NULL, conflict_alerted_at = NULL, updated_at = :updated_at
              WHERE id = :id"
         );
         $stmt->execute([
@@ -220,12 +273,14 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
-             SET status = 'pending', run_at = :run_at, payload_json = :payload_json, locked_at = NULL, locked_by = NULL, updated_at = :updated_at
-             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+             SET status = 'pending', run_at = :run_at, payload_json = :payload_json, locked_at = NULL, locked_by = NULL,
+                 last_error = NULL, conflict_count = 0, conflict_started_at = NULL, conflict_alerted_at = NULL, updated_at = :updated_at
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by AND attempts = :attempts"
         );
         $stmt->execute([
             'id' => $event->id,
             'locked_by' => $this->workerId,
+            'attempts' => $event->attempts,
             'run_at' => $runAt,
             'payload_json' => json_encode($this->persistedPayload($event->type, $payload), JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'updated_at' => $now,
@@ -239,11 +294,12 @@ final class ScheduledEventRepository
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events
              SET status = 'failed', processed_at = :processed_at, locked_at = NULL, locked_by = NULL, last_error = :last_error, updated_at = :updated_at
-             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by AND attempts = :attempts"
         );
         $stmt->execute([
             'id' => $event->id,
             'locked_by' => $this->workerId,
+            'attempts' => $event->attempts,
             'processed_at' => $now,
             'last_error' => substr($error->getMessage(), 0, 1000),
             'updated_at' => $now,
@@ -283,9 +339,9 @@ final class ScheduledEventRepository
         $now = gmdate('c');
         $stmt = $this->pdo->prepare(
             "UPDATE scheduled_events SET locked_at = :locked_at, updated_at = :updated_at
-             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by AND attempts = :attempts"
         );
-        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'locked_at' => $now, 'updated_at' => $now]);
+        $stmt->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'attempts' => $event->attempts, 'locked_at' => $now, 'updated_at' => $now]);
 
         if ($stmt->rowCount() === 1) {
             return true;
@@ -296,9 +352,9 @@ final class ScheduledEventRepository
         // harmless no-op as a lost lease.
         $check = $this->pdo->prepare(
             "SELECT COUNT(*) FROM scheduled_events
-             WHERE id = :id AND status = 'running' AND locked_by = :locked_by"
+             WHERE id = :id AND status = 'running' AND locked_by = :locked_by AND attempts = :attempts"
         );
-        $check->execute(['id' => $event->id, 'locked_by' => $this->workerId]);
+        $check->execute(['id' => $event->id, 'locked_by' => $this->workerId, 'attempts' => $event->attempts]);
 
         return (int) $check->fetchColumn() === 1;
     }
@@ -369,6 +425,9 @@ final class ScheduledEventRepository
             $row['last_error'] !== null ? (string) $row['last_error'] : null,
             (string) $row['created_at'],
             (string) $row['updated_at'],
+            (int) $row['conflict_count'],
+            $row['conflict_started_at'],
+            $row['conflict_alerted_at'],
         );
     }
 

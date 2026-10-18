@@ -1903,10 +1903,11 @@ final class MannyService implements MannyTaskRuntime
     }
 
     /** null delegates other task families to their own scheduler handlers. */
-    public function processScheduledMiningTask(ScheduledEvent $event): ?bool
+    public function processScheduledMiningTask(ScheduledEvent $event, bool &$retrySafe = false): ?bool
     {
         $candidate = $this->mannies->findById($event->entityId);
         if ($event->entityType !== 'manny' || $candidate?->currentTask !== Manny::TASK_MINING || $candidate->probeId === null) { return null; }
+        $retrySafe = true;
         $events = $this->scheduledEvents ?? throw new \LogicException('Mining requires the scheduler repository.');
         return $this->probes->withAdmittedOperation([$candidate->probeId], function () use ($candidate, $events, $event): bool {
             $probe = $this->probes->findById($candidate->probeId)

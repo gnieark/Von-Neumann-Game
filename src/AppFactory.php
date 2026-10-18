@@ -256,7 +256,8 @@ final class AppFactory
             ]),
         );
 
-        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService, $sectorEffects, $anomalyBroadcasts);
+        return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService, $sectorEffects, $anomalyBroadcasts,
+            new \VonNeumannGame\Database\MiningRetryPolicy($appConfig['schedulerMiningRetryDelays'] ?? [1, 5, 15, 60, 300], $appConfig['schedulerMiningConflictAlertSeconds'] ?? 900));
     }
 
     public function authService(PDO $pdo): AuthService

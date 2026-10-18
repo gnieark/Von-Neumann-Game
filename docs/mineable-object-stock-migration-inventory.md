@@ -313,3 +313,46 @@ Validation : **541 tests moteur**, **4 558 tests API**, suites de concurrence SQ
 Mesures locales MariaDB sur tables isolées : admission seule **0,534 ms en moyenne sur 25 opérations**, perte sans opération active **7,855 ms**, retour du drainage devant un token expiré mais encore verrouillé **5,5 ms**. Mesures indicatives de développement ; charge et volumétrie de production à vérifier au lot 6.
 
 Logs : `/tmp/vng-lot4bis-sector.log`, `/tmp/vng-lot4bis-api.log`, `/tmp/vng-lot4bis-concurrency-sqlite.log`, `/tmp/vng-lot4bis-concurrency-mariadb.log`. Aucun changement du contrat API (**v148**). Aucune écriture de production. Branche **non déployable avant les lots 5, 6 et 7** et la conversion explicite des données.
+
+
+## Lot 5 — Reprises SQL et observation, 18 octobre
+
+### Périmètre livré
+
+Le scheduler reporte les conflits temporaires du **minage Manny transactionnel**, ainsi que ceux de son admission et de sa prise en charge. Il inspecte les codes SQL d'origine, y compris derrière `StorageBusyException` : MariaDB/MySQL 1205, 1213 et 3572 ; SQLite 5 et 6. Ni une erreur métier, ni une erreur d'intégrité, ni un message contenant le mot « deadlock » ne suffisent. Les autres familles de handlers ne reçoivent aucune politique générale de replay ; le moissonnage planétaire Others reste exclu.
+
+La transaction annulée restitue débit, livraison, tâche et claim ; le ticket d'admission est supprimé avant le report. Un `UPDATE` conditionnel reporte uniquement l'événement encore `pending`, avec les mêmes `attempts`, compteur de conflits, date de programmation et identité de tâche minière, toujours rattachée à la sonde dont l'admission est ouverte. Aucun ancien worker ne reprend un événement pour en écraser le résultat. Un nouveau claim, une annulation, une tâche remplacée ou une fermeture de sonde invalide le report. Les transitions `release`, `markDone`, `markFailed` et le renouvellement de bail contrôlent aussi le numéro d'exécution, y compris lorsque les deux exécutions appartiennent au même worker.
+
+Les trois champs canoniques de `scheduled_events` sont `conflict_count`, `conflict_started_at` et `conflict_alerted_at`. Ils sont indépendants de `attempts` : un claim annulé avec la transaction ne compte pas comme une exécution métier. Les succès, y compris les reports métier normaux d'une récolte encore en attente, remettent la série de conflits à zéro. Les reprises ne réécrivent ni le payload, ni les dates de tâche, ni l'origine du délai d'attente de stockage. À chaque nouvelle tentative, admission, état courant, destination et expiration sont revérifiés ; une destination disparue devient une erreur permanente et une attente expirée termine la mission sans prélèvement.
+
+### Délais et alerte
+
+Configuration dans `config/app.json` :
+
+- `schedulerMiningRetryDelays` : `[1, 5, 15, 60, 300]`, entiers positifs croissants, plafonnés à 300 secondes. Le dernier palier est répété.
+- Dispersion de ±20 %, arrondie en secondes, minimum une seconde et maximum 300 secondes, y compris au dernier palier. Les premières plages par défaut sont donc 1, 4–6, 12–18, 48–72, puis 240–300 secondes.
+- `schedulerMiningConflictAlertSeconds` : `900`. Le premier dépassement produit un diagnostic interne avec `alert=true` et conserve sa date en SQL. Les tentatives suivantes continuent tant que la tâche est valide ; le compteur ne constitue pas un plafond d'essais. Une nouvelle série après succès peut produire une nouvelle alerte.
+
+Le worker rend la main pendant ce délai ; il ne dort pas en conservant un verrou ou une admission. L'alerte est interne au journal du serveur, sans notification joueur ni nouveau contrat public.
+
+### Diagnostics et mesures
+
+Les lignes JSON du journal portent `metric=scheduler_mining` et un résultat `sql_conflict`, `success` ou `permanent_failure`. Les conflits comportent événement, UID de Manny, ID public de source, sonde, code SQL et SQLSTATE, famille de verrou identifiée dans la pile, compteur, âge de la série, délai choisi et indicateur d'alerte. `last_error` conserve le diagnostic de conflit borné ; aucun SQL brut, secret de connexion ou payload complet n'est enregistré. La famille générique `mining_transaction` s'applique si aucune famille plus précise n'est identifiée.
+
+Les durées `duration_ms`, `admission_ms` et `transaction_ms` permettent de calculer débit, p50/p95/p99 et coût des reprises depuis les journaux. Les succès indiquent `completed` et `recovered_conflicts`. La durée d'une transaction en conflit inclut son attente ; ce n'est pas une mesure séparée de chaque acquisition de verrou. L'observation n'ajoute aucune table d'historique et une panne d'observateur ne provoque pas le replay d'une livraison commise.
+
+Deux scénarios reproductibles dans `MiningRetryConcurrencyTests.php` utilisent de vrais processus et des tables MariaDB isolées : maintien d'un verrou source avec `innodb_lock_wait_timeout=1`, puis cycle d'interblocage entre source et événement. Lors de la validation locale, le timeout 1205 a duré **1 008 ms** au total (**1 004 ms** dans la transaction), et le conflit 1213 **113 ms** (**108 ms** dans la transaction, dont la synchronisation de test de 100 ms). Dans les deux cas, aucun débit après échec, aucune admission conservée et livraison unique après reprise. Ces mesures vérifient le mécanisme, sans prétendre représenter les percentiles sous charge de production ; la comparaison de charge complète et la volumétrie restent aux lots 6/7.
+
+### Migration et validation
+
+```bash
+php scripts/one-shot-scripts/migrate-scheduler-mining-conflicts.php --database-config=PATH --dry-run
+# Sous maintenance, API writers et workers arrêtés :
+php scripts/one-shot-scripts/migrate-scheduler-mining-conflicts.php --database-config=PATH --apply
+```
+
+Le DDL est déclaré dans `SchemaInitializer`. La simulation n'ouvre aucune connexion ; l'application ajoute seulement les colonnes manquantes, reprend une migration partielle et conserve les compteurs déjà présents. Aucun événement en échec n'est remis en file par ce script. Pour la migration globale, leur annulation et le rappel métier des Mannies restent la décision du lot 6. La migration additive a été appliquée uniquement à `config/database.json`, base de développement, pour les validations.
+
+Validation : **647 tests moteur**, **4 558 tests API**, suites de concurrence SQLite et MariaDB réussies. Tests ajoutés : rollback après débit, conflit à l'admission et au commit, six conflits successifs et alerte unique, reprise avec conservation exacte, remise à zéro après report métier, erreur permanente, disparition de destination après conflit, expiration métier, ancien report après nouveau claim/libération, transitions périmées du même worker, fermeture d'admission, exclusion des handlers non prouvés, migration simulée/partielle/répétée, et conflits serveur réels 1205/1213. La syntaxe PHP et `git diff --check` sont également vérifiés.
+
+Logs : `/tmp/vng-lot5-sector.log`, `/tmp/vng-lot5-api.log`, `/tmp/vng-lot5-concurrency-sqlite.log`, `/tmp/vng-lot5-concurrency-mariadb.log`. Aucun changement du contrat API (**v148**), aucune écriture en production. Branche `removestoragesfromjsons` ; **lots 6 et 7 et conversion explicite des données encore nécessaires avant déploiement global**.

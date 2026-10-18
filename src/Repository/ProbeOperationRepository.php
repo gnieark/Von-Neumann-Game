@@ -41,16 +41,20 @@ final class ProbeOperationRepository
         }
     }
 
-    public function run(array $probeIds, callable $operation): mixed
+    public function run(array $probeIds, callable $operation, ?array &$timings = null): mixed
     {
         $probeIds = array_values(array_unique($probeIds));
         if (array_diff($probeIds, self::$contexts[$this->pdo] ?? []) === []) { return $operation(); }
         if ($this->pdo->inTransaction()) {
             throw new \LogicException('Admit probe operations before opening the business transaction.');
         }
-        $ticket = $this->admit($probeIds);
+        $started = hrtime(true);
+        try { $ticket = $this->admit($probeIds); }
+        finally { $timings['admission_ms'] = round((hrtime(true) - $started) / 1e6, 3); }
+        $started = hrtime(true);
         try { return $this->execute($ticket, $probeIds, $operation); }
         finally {
+            $timings['transaction_ms'] = round((hrtime(true) - $started) / 1e6, 3);
             // A process crash leaves the ticket for fenced lease recovery.
             $this->pdo->prepare('DELETE FROM probe_operations WHERE token=?')->execute([$ticket]);
         }

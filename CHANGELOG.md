@@ -2,6 +2,16 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-18
+
+### Changed
+
+- Stocks minables SQL, lot 5 : reprise différée des seuls conflits SQL temporaires du minage transactionnel, après rollback et libération de l'admission. Délais configurables 1/5/15/60/300 secondes avec dispersion et plafond de cinq minutes ; alerte interne après quinze minutes de conflits consécutifs, sans arrêter les reprises valides. Compteurs distincts des exécutions normales, remis à zéro après succès ; annulations, destructions et échéances métier préservées. Reports conditionnels et transitions du scheduler protégés contre les anciens baux, y compris du même worker. Diagnostics JSON internes avec codes SQL, acteurs, source, famille de verrou et durées. Contrat API inchangé (v148) ; lots 6 et 7 encore requis avant déploiement global.
+
+### Added
+
+- Migration additive explicite `scripts/one-shot-scripts/migrate-scheduler-mining-conflicts.php --database-config=PATH`, simulation sans connexion par défaut ; `--apply` sous maintenance ajoute trois champs à `scheduled_events` sans rejouer d'événement ni modifier les stocks. Reprise d'une migration partielle et conservation des compteurs existants. Configuration dans `config/app.json` : `schedulerMiningRetryDelays` et `schedulerMiningConflictAlertSeconds`.
+
 ## 2026-10-17
 
 ### Changed

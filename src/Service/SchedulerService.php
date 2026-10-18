@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace VonNeumannGame\Service;
 
 use VonNeumannGame\Domain\Manny;
+use VonNeumannGame\Database\MiningRetryPolicy;
 use VonNeumannGame\Domain\ScheduledEvent;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeMovementRepository;
@@ -32,6 +33,8 @@ final class SchedulerService
         private readonly ?OthersService $othersService = null,
         private readonly ?SectorEffectService $sectorEffects = null,
         private readonly ?AnomalyBroadcastService $anomalyBroadcasts = null,
+        private readonly MiningRetryPolicy $miningRetries = new MiningRetryPolicy(),
+        private readonly ?\Closure $miningObserver = null,
     ) {}
 
     /**
@@ -49,21 +52,49 @@ final class SchedulerService
 
         foreach ($due as $event) {
             $claimed = null;
+            $before = clone $event;
+            $context = null;
+            $retrySafe = false;
+            $started = hrtime(true);
+            $timings = [];
             try {
-                $result = $this->events->withAdmission($event, function () use ($event, &$claimed): ?bool {
+                $context = $this->events->miningContext($event);
+                // Before processing, only admission and claim can have run (both SQL-only).
+                $retrySafe = $context !== null;
+                $result = $this->events->withAdmission($event, function () use ($event, &$claimed, &$retrySafe): ?bool {
                     $claimed = $this->events->claim($event);
                     if ($claimed === null) { return null; }
-                    $done = $this->process($claimed);
+                    $retrySafe = false;
+                    $done = $this->process($claimed, $retrySafe);
                     if ($done) { $this->events->markDone($claimed); }
                     return $done;
-                });
+                }, $timings);
                 if ($result !== null) { $stats[$result ? 'processed' : 'deferred']++; }
+                if ($context !== null && $retrySafe && $result !== null) {
+                    $this->observeMining('success', ['event_id' => $event->id, 'manny' => $context['manny'], 'object_id' => $context['object_id'],
+                        'recovered_conflicts' => $before->conflictCount, 'completed' => $result] + $timings, $started);
+                }
             } catch (\VonNeumannGame\Repository\ProbeAdmissionClosedException) {
                 // The loss event owns cancellation and reservation release.
                 $stats['deferred']++;
             } catch (ScheduledEventLeaseLostException $error) {
                 throw $error;
             } catch (\Throwable $error) {
+                if ($retrySafe && $context !== null) {
+                    $conflict = MiningRetryPolicy::conflict($error, $this->events->databaseDriver());
+                    if ($conflict !== null) {
+                        $diagnostic = $this->events->deferMiningConflict($before, $context, $conflict, $this->miningRetries);
+                        if ($diagnostic !== null) { $this->observeMining('sql_conflict', $diagnostic + $timings, $started); }
+                        $stats['deferred']++;
+                    } else {
+                        if ($this->events->failRolledBackMining($before, $error)) {
+                            $this->observeMining('permanent_failure', ['event_id' => $event->id, 'manny' => $context['manny'],
+                                'object_id' => $context['object_id'], 'error_class' => get_class($error)] + $timings, $started);
+                            $stats['failed']++;
+                        }
+                    }
+                    continue;
+                }
                 if ($event->type === 'probe.loss') {
                     $this->events->release($event, gmdate('c', time() + 30), $event->payload);
                     error_log('Probe loss ' . $event->entityId . ' deferred: ' . $error->getMessage());
@@ -81,6 +112,17 @@ final class SchedulerService
         return $stats;
     }
 
+    private function observeMining(string $outcome, array $data, int $started): void
+    {
+        $record = ['metric' => 'scheduler_mining', 'outcome' => $outcome,
+            'duration_ms' => round((hrtime(true) - $started) / 1e6, 3)] + $data;
+        // Observation must never turn a committed delivery into a failed/replayed operation.
+        try {
+            if ($this->miningObserver !== null) { ($this->miningObserver)($record); }
+            else { error_log(json_encode($record, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)); }
+        } catch (\Throwable) { error_log('scheduler_mining observer failed'); }
+    }
+
     public function recoverExpiredRunningEvents(int $leaseSeconds): int
     {
         $this->events->recoverExpiredAdmissions();
@@ -92,14 +134,14 @@ final class SchedulerService
         return $this->events->recoverExpiredLeases($expiredBefore);
     }
 
-    private function process(ScheduledEvent $event): bool
+    private function process(ScheduledEvent $event, bool &$retrySafe): bool
     {
         return match ($event->type) {
             'probe.loss' => $this->processProbeLoss($event),
             self::PROBE_MOVEMENT_PHASE => $this->processProbeMovementPhase($event),
             self::PROBE_BLACK_HOLE_TRAP => $this->processProbeBlackHoleTrap($event),
             self::PROBE_STORAGE_CONTAINER_BREAK => $this->processProbeStorageContainerBreak($event),
-            self::MANNY_TASK => $this->processMannyTask($event),
+            self::MANNY_TASK => $this->processMannyTask($event, $retrySafe),
             self::ASTEROID_TRAJECTORY_PHASE => $this->processAsteroidTrajectoryPhase($event),
             'sector.effect' => $this->processSectorEffect($event),
             'anomaly.broadcast' => $this->processAnomalyBroadcast($event),
@@ -178,7 +220,7 @@ final class SchedulerService
         return true;
     }
 
-    private function processMannyTask(ScheduledEvent $event): bool
+    private function processMannyTask(ScheduledEvent $event, bool &$retrySafe): bool
     {
         if ($this->othersService?->processScheduledMannyMissile($event) === true) {
             return true;
@@ -187,7 +229,7 @@ final class SchedulerService
             throw new \RuntimeException('Manny scheduler is unavailable.');
         }
 
-        $miningResult = $this->mannyService->processScheduledMiningTask($event);
+        $miningResult = $this->mannyService->processScheduledMiningTask($event, $retrySafe);
         if ($miningResult !== null) { return $miningResult; }
 
         $manny = $this->mannyService->refreshScheduledMannyTask($event);
