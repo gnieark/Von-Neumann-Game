@@ -26,6 +26,7 @@ AGENTS.md
 /scripts/others_control/config.json
 
 # Logs and cache
+/scripts/others_control/logs/
 *.log
 __pycache__/
 *.py[cod]
