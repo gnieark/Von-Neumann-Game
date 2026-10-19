@@ -12,6 +12,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Added
 
+- Stocks minables SQL, lot 7 : procédure de bascule pour exécution par l’opérateur, avec Git/PHP sous `www-data`, services de production identifiés, révision figée, sauvegarde de code/configuration et retour coordonné avant reprise. Contrôle `scripts/check-mineable-cutover.php` en lecture seule avant réouverture ou pendant le jeu ; résumé `scripts/summarize-mining-metrics.php` des percentiles, conflits et exécutions terminées sur une fenêtre de journal. Aucun changement de contrat API (v148), aucune migration de production exécutée par ces travaux. Procédure : `docs/mineable-object-stock-cutover.md`.
+
 - Outil `scripts/one-shot-scripts/migrate-mineable-object-stocks.php` : simulation en lecture seule par défaut, application/reprise avec manifeste, vérification indépendante et restauration coordonnée sous maintenance. Export synchronisé assisté par `export-mineable-maintenance-copy.sh`. Procédure : `docs/mineable-object-stock-migration-runbook.md` ; résultats de répétition : `docs/mineable-object-stock-migration-inventory.md`.
 
 - Migration additive explicite `scripts/one-shot-scripts/migrate-scheduler-mining-conflicts.php --database-config=PATH`, simulation sans connexion par défaut ; `--apply` sous maintenance ajoute trois champs à `scheduled_events` sans rejouer d'événement ni modifier les stocks. Reprise d'une migration partielle et conservation des compteurs existants. Configuration dans `config/app.json` : `schedulerMiningRetryDelays` et `schedulerMiningConflictAlertSeconds`.

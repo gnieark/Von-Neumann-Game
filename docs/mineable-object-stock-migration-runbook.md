@@ -1,6 +1,6 @@
 # Migration des stocks minables — maintenance et restauration
 
-Cette procédure convertit ensemble SQL et les secteurs pour les lots 1 à 6. Le déploiement en production relève du lot 7. Les planètes, leur moissonnage Others et les constructs hors `others_mothership_wreck` conservent leurs stocks JSON. Le contrat public reste en version 148.
+Cette procédure convertit ensemble SQL et les secteurs pour les lots 1 à 6. Le déploiement en production relève du lot 7 : [commandes de bascule et surveillance](mineable-object-stock-cutover.md), préparées pour exécution par l’opérateur. Les planètes, leur moissonnage Others et les constructs hors `others_mothership_wreck` conservent leurs stocks JSON. Le contrat public reste en version 148.
 
 ## Préparer la copie et la maintenance
 

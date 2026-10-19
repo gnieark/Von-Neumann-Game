@@ -1,6 +1,6 @@
 # Stocks minables SQL — inventaire du lot 0
 
-Date : 16 octobre 2026. Mise à jour : 18 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’au lot 6 ; aucune bascule de production n’a été exécutée. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
+Date : 16 octobre 2026. Mise à jour : 18 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’à la préparation du lot 7 ; aucune bascule de production n’a été exécutée. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
 
 ## Périmètre et écarts constatés
 
@@ -442,3 +442,25 @@ La répétition utilise MariaDB 11.8 local avec données sur `/tmp`, tandis que 
 Les artefacts complets restent privés dans `var/lot6-rehearsal/` : `dry-run.json`, `job/`, `interrupt-stocks.json`, `interrupt-descriptors.json`, `applied.json`, `verified.json`, `restored.json`, `restoration-proof.php`, `restoration-proof.json` et son journal. Les journaux de tests sont `/tmp/vng-lot6-sector.log`, `/tmp/vng-lot6-api.log`, `/tmp/vng-lot6-others.log` et `/tmp/vng-lot6-concurrency-{sqlite,mariadb}-final.log`. Aucun secret ni dump n’est ajouté au dépôt.
 
 Contrat API inchangé (**v148**), branche `removestoragesfromjsons`, aucun commit/push effectué pour ce lot. **Lot 6 terminé sur copie complète. Le lot 7, la migration effective et la surveillance de production restent à réaliser avant ouverture du nouveau format.**
+
+
+## Lot 7 — Préparation de la bascule par l’opérateur, 18 octobre
+
+**Décision utilisateur : préparer et tester les outils et commandes ; l’utilisateur exécutera la bascule.** La production n’a pas été modifiée. Cette section livre la préparation du lot 7 ; elle ne vaut pas clôture de la bascule opérationnelle.
+
+La [procédure de bascule](mineable-object-stock-cutover.md) utilise les paramètres confirmés : `/var/www/neumann-probe.tinad.fr/`, compte Git/PHP `www-data`, scheduler `php-vhost-neumann-probe-scheduler`, PHP-FPM `php8.4-fpm`. Elle couvre le repérage des autres writers, la révision Git figée après fetch par le compte disposant de la clé, l’arrêt/drainage, la sauvegarde de code/configuration/dépendances, l’application avec sauvegarde SQL/JSON, la vérification stricte avant reprise, puis la réouverture progressive. Les contrôleurs Others et cron doivent être identifiés par l’opérateur ; aucun nom de service n’est inventé.
+
+Deux outils sont disponibles :
+
+- `scripts/check-mineable-cutover.php` : paire base/univers et manifeste explicites, connexion en lecture seule, instantané SQL cohérent, contrôle de l’identité de migration et du hash du plan. `--before-open` effectue aussi la vérification stricte du lot 6. Après reprise, le mode normal accepte l’évolution légitime des stocks et observe les états du scheduler, les conflits prolongés, les échecs depuis une date explicite, les publications en retard/en erreur, les admissions expirées et les destructions de sondes non terminées. Aucun événement exécuté, aucun bail récupéré, aucune donnée corrigée. Codes de sortie 0/1/2 pour absence de signal, avertissement, anomalie ou contrôle impossible.
+- `scripts/summarize-mining-metrics.php` : lecture d’un export de journal sélectionné par l’opérateur, percentiles p50/p95/p99 exacts par résultat, durées d’admission/transaction, codes SQL et familles de verrou, alertes, reprises réussies et débit d’exécutions terminées. Les reports métier réussis ne comptent pas dans ce débit. Absence de mesures, lignes invalides et durée de fenêtre inconnue sont explicites ; aucun payload brut n’est reproduit.
+
+La procédure distingue le retour avant reprise d’un writer de l’incident après réouverture : **dès le redémarrage du scheduler, restaurer la sauvegarde historique peut perdre les nouvelles écritures**, même si nginx reste arrêté. Un ancien journal dépourvu de métriques comparables ne constitue pas une mesure avant/après ; les fenêtres réelles et les contrôles de minage seront à consigner par l’opérateur.
+
+Validation locale : **752 assertions moteur réussies**, dont le contrôle CLI en lecture seule d’une vraie fixture migrée avec vérification complète, le refus des mauvais manifestes/paires, l’acceptation de stocks ayant évolué, la séparation des échecs anciens/nouveaux, les pertes bloquées et le calcul des percentiles. **5 assertions MariaDB** supplémentaires passent sur des tables préfixées isolées, supprimées en fin de test : lecture du schéma canonique, détection d’un échec récent, agrégation et refus serveur d’une écriture dans la transaction en lecture seule. Les sorties CLI du résumé de métriques ont aussi été vérifiées pour succès, échec permanent et journal vide. Syntaxe PHP, blocs Bash de la procédure et `git diff --check` vérifiés.
+
+Le premier essai en lecture seule sur les tables courantes de développement a correctement refusé leur schéma non converti (`mannies.is_forgotten` absent). Aucune migration de ces tables n’a été faite pour contourner cette erreur ; les validations MariaDB utilisent leur propre schéma isolé. Les suites API/Others/concurrence du lot 6 ne sont pas réexécutées pour ces outils d’exploitation, qui ne modifient aucun chemin de jeu ni contrat public (**v148**).
+
+Commandes de validation : `php tests/SectorTests.php` et `php tests/MineableCutoverMysqlTests.php --mysql-config=config/database.json` (développement uniquement). Journaux : `/tmp/vng-lot7-sector.log`, `/tmp/vng-lot7-monitor-mariadb.log`. Aucun commit ni push réalisé par l’assistant. La modification préexistante de `.gitignore` est conservée.
+
+**À compléter après exécution par l’opérateur :** révisions et heures effectives, manifeste de production et résultats de conversion, minages/rappels de contrôle, remise en service de chaque writer, métriques et erreurs des premières fenêtres puis suivi à J+1. La production ne pourra être déclarée basculée qu’après ces validations.

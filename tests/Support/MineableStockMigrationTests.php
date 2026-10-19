@@ -67,6 +67,17 @@ require_once __DIR__ . '/MiningRetryFixture.php';
         $migration = new MineableStockMigration($db, $universe);
         $result = $migration->apply($job, [], $recall);
         $test->assert($result['complete'], 'interrupted migration completes with its original manifest');
+        file_put_contents($directory . '/cutover-db.json', json_encode(['driver' => 'sqlite', 'path' => $directory . '/world.sqlite']));
+        $beforeCutoverHash = hash_file('sha256', $pathA);
+        $check = proc_open([PHP_BINARY, dirname(__DIR__, 2) . '/scripts/check-mineable-cutover.php',
+            '--database-config=' . $directory . '/cutover-db.json', '--universe-path=' . $universe,
+            '--manifest-dir=' . $job, '--since=' . gmdate('c'), '--before-open'], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $checkPipes);
+        $checkOutput = stream_get_contents($checkPipes[1]);
+        $checkError = stream_get_contents($checkPipes[2]);
+        fclose($checkPipes[1]); fclose($checkPipes[2]);
+        $test->assert(proc_close($check) < 2, 'before-opening CLI accepts a fully migrated fixture: ' . $checkError);
+        $test->assertEquals(true, json_decode($checkOutput, true)['beforeOpenVerification']['verified'] ?? null, 'before-opening CLI proves stock and sector conversion');
+        $test->assertEquals($beforeCutoverHash, hash_file('sha256', $pathA), 'before-opening CLI preserves the sector bytes');
         (new StorageMigrationRepository($db))->assertReady();
         $test->assertEquals(1, $result['verification']['renamed'], 'resume keeps the same renaming plan');
         $test->assertEquals(2, (int) $db->query('SELECT COUNT(*) FROM mineable_object_stocks')->fetchColumn(), 'resume imports each source exactly once');
