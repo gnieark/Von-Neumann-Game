@@ -69,6 +69,31 @@ final class GerminationDepotService
         return $this->others->findActionByPublicId($action['public_id']) ?? throw new \RuntimeException('Action creation failed.');
     }
 
+    public function depositAuxiliaries(array $ship, int $count): array
+    {
+        $auxiliaries = $this->actors->availableAuxiliaries((int) $ship['id'], $count);
+        if (count($auxiliaries) !== $count) { throw new OthersActionException(422, 'insufficient_resources', 'Not enough available embarked auxiliaries for the requested deposit.'); }
+        foreach ($auxiliaries as &$auxiliary) {
+            $auxiliary = $this->locks->lock('auxiliary', (int) $auxiliary['id']);
+            $this->assertActor($ship, $auxiliary, (int) $ship['id']);
+        }
+        unset($auxiliary);
+        return $auxiliaries;
+    }
+
+    public function createCollectiveDeposit(array $ship, array $auxiliaries, array $payload, \DateTimeImmutable $now, \DateTimeImmutable $end): array
+    {
+        $action = $this->others->createAction($ship, 'depot_deposit', 'others_ship', $ship['public_id'], $payload, $end->format('c'));
+        foreach ($auxiliaries as $auxiliary) {
+            if (!$this->actors->reserveAuxiliary($ship, $auxiliary, (int) $action['id'], $payload['depotId'], $now->format('c'))) {
+                throw new OthersActionException(409, 'action_conflict', 'An auxiliary was reserved concurrently.');
+            }
+        }
+        $event = $this->events->schedule(SchedulerService::OTHERS_ACTION, 'others_action', (int) $action['id'], $end->format('c'));
+        $this->actors->attachEvent((int) $action['id'], $event->id, $now->format('c'));
+        return $this->others->findActionByPublicId($action['public_id']) ?? throw new \RuntimeException('Action creation failed.');
+    }
+
     /** Locks in actor order, before locking the action, including on replay. */
     public function completeConstruction(int $actionId, string $causalTime, ?string $interruption = null): void
     {
@@ -109,7 +134,7 @@ final class GerminationDepotService
     public function makeDormant(array $actor, int $actionId, string $now): string
     {
         $object = DormantConstruct::fromOthersAuxiliary($actor['public_id']);
-        $this->effects->enqueue('storage-dormant-' . $actionId, $this->coordinates($actor), 'add_object', $object->getId(), $object->toArray(), $now);
+        $this->effects->enqueue('storage-dormant-' . $actionId . '-' . $actor['public_id'], $this->coordinates($actor), 'add_object', $object->getId(), $object->toArray(), $now);
         $this->actors->deleteAuxiliary((int) $actor['id']);
         return $object->getId();
     }

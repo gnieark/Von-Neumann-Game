@@ -6,6 +6,8 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ### Changed
 
+- API **v149** : ajout de `POST /api/others/ships/{shipId}/depot-deposits` avec `auxiliaryCount` obligatoire. Sélection atomique du nombre exact d’auxiliaires disponibles, sans immobiliser le vaisseau. Répartition des trajets entiers (2 ECE / 600 s), réservation du contenu au départ et règlement commun à la fin. Un auxiliaire détruit fait perdre toute sa part sans interrompre les survivants ni modifier l’échéance ; le départ ou la destruction du porteur livre les parts survivantes et laisse leurs auxiliaires dormants. Migration explicite des bases existantes : `php scripts/one-shot-scripts/migrate-collective-depot-deposits.php`, sous maintenance, après sauvegarde. Sans argument, le script applique la migration sur la base par défaut (`config/database.json`), pour permettre son exécution par `update-production.sh` ; `--database-config=PATH` et `--dry-run` restent disponibles. Aucune transformation des transferts existants.
+
 - Stocks minables SQL, lot 7 : bascule de production effectuée après arrêt des écritures, snapshots hors ligne des VM applicative/SQL et sauvegarde complète SQL/secteurs. 84 949 stocks importés, 45 Mannies oubliées converties et un événement Manny en échec annulé avec rappel métier. Vérifications intégrales réussies, reprise progressive de tous les services et contrôles de livraisons réelles avec égalité débit/crédit. Contrat API inchangé (v148). Compte rendu et limites de surveillance dans `docs/mineable-object-stock-migration-inventory.md`.
 
 ## 2026-10-18

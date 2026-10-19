@@ -104,6 +104,34 @@ final class TransferLoadPlanner
             'durationSeconds' => $tripCount * $tripSeconds, 'totalUnits' => $total, 'loads' => $loads, 'tailResources' => $remaining];
     }
 
+    /** Split whole trips into balanced contiguous shares, without expanding resource-only trips. */
+    public function shares(array $plan, int $count): array
+    {
+        if ($count < 1) { throw new \InvalidArgumentException('A positive auxiliary count is required.'); }
+        $shares = [];
+        $firstTrip = 0;
+        for ($index = 0; $index < $count; $index++) {
+            $trips = intdiv($plan['tripCount'], $count) + (int) ($index < $plan['tripCount'] % $count);
+            $endTrip = $firstTrip + $trips;
+            $units = []; $ids = [];
+            for ($trip = $firstTrip; $trip < min($endTrip, count($plan['loads'])); $trip++) {
+                foreach ($plan['loads'][$trip]['resources'] as $type => $amount) { $units[$type] = ($units[$type] ?? 0) + $amount; }
+                array_push($ids, ...$plan['loads'][$trip]['itemIds']);
+            }
+            $start = max(0, $firstTrip - count($plan['loads'])) * $plan['capacityUnits'];
+            $end = max(0, $endTrip - count($plan['loads'])) * $plan['capacityUnits'];
+            $position = 0;
+            foreach ($plan['tailResources'] as $type => $amount) {
+                $take = max(0, min($end, $position + $amount) - max($start, $position));
+                if ($take > 0) { $units[$type] = ($units[$type] ?? 0) + $take; }
+                $position += $amount;
+            }
+            $shares[] = ['resources' => array_map(static fn(int $amount): float => $amount / 10000, $units), 'itemIds' => $ids, 'roundTrips' => $trips];
+            $firstTrip = $endTrip;
+        }
+        return $shares;
+    }
+
     public function endsAt(array $plan, \DateTimeImmutable $start): \DateTimeImmutable
     {
         $duration = $plan['durationSeconds'];

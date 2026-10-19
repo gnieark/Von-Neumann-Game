@@ -244,6 +244,7 @@ use VonNeumannGame\Service\Storage\TransferLoadPlanner;
     $test->assertEquals(0,(int)$db->query('SELECT COUNT(*) FROM sector_storage_resource_reservations')->fetchColumn(),'recall releases the pending source reservation');
     $mannyTransfers->complete($recallTransfer['transfer']['id'],$recallTransfer['transfer']['endsAt']);
     $test->assertEquals('canceled',$mannyTransfers->get($probe,$recallTransfer['transfer']['id'])['status'],'a delayed transfer event cannot revive a recalled task');
+    require __DIR__ . '/CollectiveDepotTests.php';
     $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::CHILD_FIRST);
     foreach($iterator as $entry){if($entry->isDir()){rmdir($entry->getPathname());}else{unlink($entry->getPathname());}}
     rmdir($directory);

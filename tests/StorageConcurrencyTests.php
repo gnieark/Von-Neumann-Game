@@ -88,6 +88,12 @@ try{
         $assert($migration->run(false)['changeRequired'], 'MariaDB schema dry run detects the old sector effect constraint');
         $migration->run(true);
         $assert(!$migration->run(true)['changeRequired'], 'MariaDB sector creation schema upgrade is resumable');
+        $db->exec('ALTER TABLE sector_storage_transfers MODIFY COLUMN actor_kind VARCHAR(255) NOT NULL');
+        $db->exec("ALTER TABLE sector_storage_transfers ADD CONSTRAINT old_transfer_actor CHECK(actor_kind IN ('others_auxiliary','manny'))");
+        $migration = new \VonNeumannGame\Database\Migration\CollectiveDepotSchemaMigration($db);
+        $assert($migration->run(false)['changeRequired'], 'MariaDB collective deposit migration detects the old actor constraint');
+        $migration->run(true);
+        $assert(!$migration->run(true)['changeRequired'], 'MariaDB collective deposit migration is replayable');
     }
     $now=gmdate('c');$db->prepare('INSERT INTO players(username,created_at,updated_at) VALUES(?,?,?)')->execute(['race-player',$now,$now]);
     $others=new OthersRepository($db);$fleet=$others->createFleet(1,3,4,5);$ship=$others->findShipsByFleetId((int)$fleet['id'])[0];
@@ -114,6 +120,35 @@ try{
     $assert((int)$db->query("SELECT COUNT(*) FROM others_inventory_items WHERE public_id='race-last-item'")->fetchColumn()===1,'one physical destination identity remains');
     $assert((int)$db->query('SELECT COUNT(*) FROM sector_storage_item_claims')->fetchColumn()===0,'no item claims remain after concurrent completion');
     $assert((float)$db->query('SELECT SUM(inventory_reserved) FROM others_ships')->fetchColumn()===0.0,'no capacity remains reserved after concurrent completion');
+    [$collectiveOthers] = $services($db);
+    $collectiveShip = $collectiveOthers->createStandardShip($ships[0]);
+    $collectiveShip = $collectiveOthers->findShipByPublicId($collectiveShip['public_id']);
+    $collectiveOthers->createAuxiliary((int) $collectiveShip['id']);
+    $collectiveOthers->createAuxiliary((int) $collectiveShip['id']);
+    $db->prepare("UPDATE others_inventory_resources SET amount=10 WHERE ship_id=? AND resource_type='metals'")->execute([$collectiveShip['id']]);
+    $collectiveOthers = null; $db = null;
+    $startCollective = static function (PDO $db) use ($services, $collectiveShip, $depot): array {
+        [, , $transfers] = $services($db);
+        $action = $transfers->startCollectiveDeposit($collectiveShip, ['depotId' => $depot['public_id'], 'resources' => ['metals' => 10], 'itemIds' => [], 'auxiliaryCount' => 2]);
+        return ['id' => (int) $action['id'], 'endsAt' => $action['ends_at']];
+    };
+    $results = $race([$startCollective, $startCollective]);
+    $successful = array_values(array_filter($results, static fn(array $r): bool => $r['ok']));
+    $assert(count($successful) === 1, 'two collective commands cannot reserve the same participants: ' . json_encode($results));
+    $collectiveWinner = $successful[0]['result'];
+    $db = $connect();
+    $assert((int) $db->query('SELECT COUNT(*) FROM others_auxiliaries WHERE current_action_id=' . $collectiveWinner['id'])->fetchColumn() === 2, 'concurrent collective acceptance reserves exactly two participants');
+    $db = null;
+    $finishCollective = static function (PDO $db) use ($services, $collectiveWinner): bool {
+        [, , $transfers] = $services($db);
+        $transfers->completeOthers($collectiveWinner['id'], $collectiveWinner['endsAt']);
+        return true;
+    };
+    $results = $race([$finishCollective, $finishCollective]);
+    $assert($results[0]['ok'] && $results[1]['ok'], 'concurrent collective settlements are idempotent');
+    $db = $connect();
+    $assert((float) $db->query("SELECT amount FROM others_inventory_resources WHERE ship_id=" . (int) $collectiveShip['id'] . " AND resource_type='metals'")->fetchColumn() === 0.0, 'collective cargo is debited once after concurrent completion');
+    $assert((int) $db->query('SELECT COUNT(*) FROM others_auxiliaries WHERE current_action_id=' . $collectiveWinner['id'])->fetchColumn() === 0, 'concurrent collective settlement releases all participants');
     $mannyServices=static function(PDO $pdo):array{
         $probes=new \VonNeumannGame\Repository\NeumannProbeRepository($pdo);
         $mannies=new \VonNeumannGame\Repository\MannyRepository($pdo);

@@ -21,7 +21,7 @@ final class TargetRepository
     /** @param array<string|int, mixed> $parameters */
     public function findAuxiliaryTarget(array $parameters): array|false
     {
-        $statement = $this->pdo->prepare("SELECT id,public_id,sector_x,sector_y,sector_z FROM others_auxiliaries WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND location_type='deployed' AND destroyed_at IS NULL AND status<>'dormant'");
+        $statement = $this->pdo->prepare("SELECT id,ship_id,public_id,sector_x,sector_y,sector_z FROM others_auxiliaries WHERE public_id=:id AND sector_x=:x AND sector_y=:y AND sector_z=:z AND location_type='deployed' AND destroyed_at IS NULL AND status<>'dormant'");
         $statement->execute($parameters);
         return $statement->fetch();
     }

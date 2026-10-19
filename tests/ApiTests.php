@@ -963,6 +963,9 @@ foreach (['storage-transfers', 'transfer-deuterium-from-external-storage'] as $t
     $test->assertEquals(['transfer', 'manny'], $schema['required'] ?? null, $task . ' response requires its transfer and Manny');
     $test->assertEquals('#/components/schemas/Manny', $schema['properties']['manny']['$ref'] ?? null, $task . ' response validates the canonical Manny schema');
 }
+$collectiveDepositContract = $openApiOthersDocument['paths']['/api/others/ships/{shipId}/depot-deposits']['post'] ?? [];
+$test->assertEquals(['auxiliaryCount', 'depotId', 'resources', 'itemIds'], $collectiveDepositContract['requestBody']['content']['application/json']['schema']['required'] ?? null, 'collective depot contract requires count and manifest');
+$test->assertEquals('#/components/schemas/OthersCollectiveDepotDepositAction', $collectiveDepositContract['responses']['202']['content']['application/json']['schema']['properties']['action']['$ref'] ?? null, 'collective depot response uses its typed action schema');
 $depotActionContracts = [
     'build-germination-depot' => ['OthersDepotConstructionAction', 'build_germination_depot'],
     'depot-deposits' => ['OthersDepotDepositAction', 'depot_deposit'],
@@ -4837,7 +4840,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(148, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(149, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -12661,6 +12664,7 @@ $test->assert(PersistenceArchitecture::violations('<?php use PDO as Connection; 
 $test->assert(PersistenceArchitecture::violations('<?php class R { public function run($input) { return $this->db->prepare($input); } }', true) !== [], 'architecture guard rejects arbitrary SQL independent of parameter name');
 $test->assertEquals([], PersistenceArchitecture::violations('<?php // $pdo->query("SELECT * FROM x");', false), 'architecture guard ignores SQL mentioned in comments');
 require __DIR__ . '/Support/StorageBudgetTests.php';
+require __DIR__ . '/Support/CollectiveDepotMigrationTests.php';
 require __DIR__ . '/Support/GerminationDepotTests.php';
 require __DIR__ . '/Support/OthersAnomalyAlertMigrationTests.php';
 require __DIR__ . '/Support/SectorStorageHttpTests.php';

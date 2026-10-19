@@ -17,6 +17,13 @@ final class StorageActorRepository
         return $query->rowCount() === 1;
     }
 
+    public function availableAuxiliaries(int $shipId, int $count): array
+    {
+        $query = $this->pdo->prepare("SELECT * FROM others_auxiliaries WHERE ship_id=? AND destroyed_at IS NULL AND current_action_id IS NULL AND location_type='embarked' AND status IN ('inactive','available') ORDER BY id LIMIT " . $count);
+        $query->execute([$shipId]);
+        return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function reserveAuxiliary(array $ship, array $auxiliary, int $actionId, ?string $objectId, string $now): bool
     {
         $query = $this->pdo->prepare("UPDATE others_auxiliaries SET status='busy',location_type='deployed',spatial_state='moving_to_sector_object',sector_x=?,sector_y=?,sector_z=?,current_action_id=?,object_id=?,updated_at=? WHERE id=? AND current_action_id IS NULL AND location_type='embarked' AND destroyed_at IS NULL");

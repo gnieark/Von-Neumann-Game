@@ -1187,7 +1187,7 @@ final class SchemaInitializer
             )",
             "CREATE TABLE IF NOT EXISTS sector_storage_transfers (
                 id $id, public_id $text NOT NULL UNIQUE, player_id INTEGER NOT NULL,
-                actor_kind $text NOT NULL CHECK(actor_kind IN ('others_auxiliary','manny')),
+                actor_kind $text NOT NULL CHECK(actor_kind IN ('others_auxiliary','others_ship','manny')),
                 actor_public_id $text NOT NULL, others_ship_id INTEGER NULL, probe_id INTEGER NULL,
                 others_action_id INTEGER NULL UNIQUE, manny_id INTEGER NULL,
                 external_storage_kind $text NOT NULL CHECK(external_storage_kind IN ('depot','detached')),

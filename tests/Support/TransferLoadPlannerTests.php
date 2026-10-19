@@ -14,6 +14,9 @@ use VonNeumannGame\Service\AnomalyBroadcastService;
     $test->assertEquals(3, $plan['tripCount'], 'storage planner: indivisible objects require three loads');
     $huge = $planner->plan(['metals'=>1000000000.0], []);
     $test->assertEquals(0, count($huge['loads']), 'storage planner: a billion ECE does not expand trips');
+    $shares = $planner->shares($huge, 3);
+    $test->assertEquals(1000000000.0, array_sum(array_column(array_column($shares, 'resources'), 'metals')), 'collective planner conserves huge cargo without expanding resource trips');
+    $test->assertEquals([166666667, 166666667, 166666666], array_column($shares, 'roundTrips'), 'collective planner balances huge counts of whole trips');
     foreach ([0,-1,INF,NAN,0.00001,'2'] as $bad) {
         $thrown = false;
         try { TransferLoadPlanner::units($bad); } catch (InvalidArgumentException) { $thrown = true; }

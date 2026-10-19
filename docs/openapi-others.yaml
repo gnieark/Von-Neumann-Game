@@ -1,9 +1,9 @@
 ---
 openapi: 3.0.3
-# Internal SQL stock lifecycle/forgotten-Manny migration: public representations and API v148 are unchanged.
+# Internal SQL stock lifecycle/forgotten-Manny migration does not alter public stock representations.
 info:
   title: Von Neumann Game — Others API
-  version: '148'
+  version: '149'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Whenever the rate limiter is consulted and available,
@@ -125,6 +125,117 @@ paths:
         Successful completion also records the depot sector in the builder fleet's known depots,
         exposed by GET /api/others/fleets/{fleetId}/known-depots. Starting or interrupting construction
         does not record a discovery.
+  /api/others/ships/{shipId}/depot-deposits:
+    post:
+      tags: [Others]
+      summary: Deposit cargo with a group of auxiliaries
+      parameters:
+      - name: shipId
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: ^[!-~]+$
+      responses:
+        '202':
+          description: One collective transfer action; inspect through the existing action route
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [action]
+                properties:
+                  action:
+                    $ref: '#/components/schemas/OthersCollectiveDepotDepositAction'
+        '400':
+          description: Invalid payload, quantity, identifier or cursor
+        '401':
+          description: Authentication required
+        '403':
+          description: Action is not permitted
+        '404':
+          description: Object not found or inaccessible to this actor
+        '409':
+          description: Busy actor, inventory_changed or idempotency_key_conflict
+        '422':
+          description: Insufficient stock, capacity or incompatible content
+        '503':
+          description: Temporary storage contention; retry with the same Idempotency-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - auxiliaryCount
+              - depotId
+              - resources
+              - itemIds
+              properties:
+                auxiliaryCount:
+                  type: integer
+                  minimum: 1
+                  description: Exact number of available embarked auxiliaries to reserve.
+                depotId:
+                  type: string
+                  minLength: 1
+                resources:
+                  type: object
+                  additionalProperties: false
+                  minProperties: 0
+                  properties:
+                    deuterium:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    metals:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    ice:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                    carbon_compounds:
+                      type: number
+                      exclusiveMinimum: true
+                      minimum: 0
+                      multipleOf: 0.0001
+                itemIds:
+                  type: array
+                  maxItems: 500
+                  uniqueItems: true
+                  items:
+                    type: string
+                    minLength: 1
+      description: >-
+        Selects exactly auxiliaryCount surviving, idle, embarked auxiliaries of this stationary carrier.
+        Returns 422 insufficient_resources if fewer are available, without partial reservations.
+        The ship remains free; other deposits may run concurrently with different available auxiliaries
+        and unreserved cargo. The depot must be in the carrier sector. Objects larger than 2 ECE are rejected.
+        The existing 2 ECE indivisible loads are distributed in stable auxiliary order into balanced,
+        contiguous shares; duration is ceil(roundTrips / auxiliaryCount) * 600 seconds.
+        All selected auxiliaries remain reserved until common settlement, including unused auxiliaries
+        when there are fewer trips than participants. Cargo is reserved immediately and stocks change
+        only at settlement. Destruction removes the participant's entire fixed share from final delivery;
+        that share is lost, including its items. Survivors continue with the original deadline and no
+        redistribution. If every participant is destroyed the action fails immediately. Otherwise it
+        succeeds at the deadline, possibly with losses. Carrier departure/destruction deposits surviving
+        shares immediately and leaves surviving participants dormant. Already-due completion takes
+        precedence over interruption. Deuterium is cargo and does not refill propulsion tanks.
   /api/others/ships/{shipId}/auxiliaries/{auxiliaryId}/depot-deposits:
     post:
       tags: [Others]
@@ -2078,7 +2189,7 @@ components:
           enum: [queued, succeeded, failed, canceled]
           description: >-
             queued until terminal settlement; succeeded on completion, canceled
-            on carrier departure/destruction, failed on auxiliary destruction.
+            on carrier departure/destruction, failed on auxiliary destruction (all participants for a collective deposit).
             Completion already due at interruption takes precedence.
         actor:
           type: object
@@ -2086,11 +2197,11 @@ components:
           properties:
             kind:
               type: string
-              enum: [others_auxiliary]
+              enum: [others_auxiliary, others_ship]
             id:
               type: string
               minLength: 1
-              description: Original public auxiliary id, also retained after dormancy or destruction.
+              description: Original public auxiliary id, or carrier id for collective deposits; retained after destruction.
         createdAt:
           type: string
           format: date-time
@@ -2201,6 +2312,23 @@ components:
           type:
             type: string
             enum: [depot_deposit]
+    OthersCollectiveDepotDepositAction:
+      allOf:
+      - $ref: '#/components/schemas/OthersDepotDepositAction'
+      - type: object
+        properties:
+          actor:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [others_ship]
+          transfer:
+            type: object
+            required: [auxiliaryCount, auxiliaryIds]
+          result:
+            type: object
+            required: [destroyedAuxiliaryIds, dormantAuxiliaryIds]
     OthersDepotWithdrawalAction:
       allOf:
       - $ref: '#/components/schemas/OthersDepotTransferAction'
@@ -2232,7 +2360,18 @@ components:
           type: integer
           minimum: 600
           multipleOf: 600
-          description: roundTrips multiplied by 600 seconds (300 outbound and 300 returning).
+          description: 600 seconds per trip (300 outbound and 300 returning); collective duration is ceil(roundTrips / auxiliaryCount) * 600.
+        auxiliaryCount:
+          type: integer
+          minimum: 1
+          description: Present for collective deposits; exact number reserved until settlement.
+        auxiliaryIds:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+          description: Present for collective deposits; selected public auxiliary ids, retained after destruction.
     OthersDepotResourceAmounts:
       type: object
       additionalProperties: false
@@ -2278,13 +2417,13 @@ components:
           - $ref: '#/components/schemas/OthersDepotContent'
           description: >-
             Content credited to destination. Includes the whole outgoing deposit
-            on carrier departure/destruction; interrupted withdrawals deliver nothing.
+            on carrier departure/destruction, excluding destroyed participants' shares for collective deposits; interrupted withdrawals deliver nothing.
         lost:
           allOf:
           - $ref: '#/components/schemas/OthersDepotContent'
           description: >-
             Only the virtual load carried when the auxiliary was destroyed. An
-            empty leg loses nothing; earlier virtual trips are not credited separately.
+            empty leg loses nothing; earlier virtual trips are not credited separately. For collective deposits, each destroyed participant loses its entire assigned share.
         released:
           allOf:
           - $ref: '#/components/schemas/OthersDepotContent'
@@ -2295,6 +2434,18 @@ components:
           description: >-
             Present on carrier_departure or carrier_destroyed; public sector-object
             id of the intact dormant auxiliary. Absent on success or auxiliary destruction.
+        destroyedAuxiliaryIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: Collective deposits only; public ids of participants destroyed before the deadline.
+        dormantAuxiliaryIds:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: Collective deposits only; sector-object ids of surviving participants left dormant on carrier interruption.
       example:
         outcome: auxiliary_destroyed
         delivered: {resources: {}, itemIds: []}

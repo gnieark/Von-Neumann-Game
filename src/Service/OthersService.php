@@ -1394,7 +1394,7 @@ final class OthersService
     private function destroyAuxiliary(array $target,string $causalTime): void
     {
         $query = $this->persistence->destruction->findAuxiliaryStorageActions([(int) $target['sql_id']]);
-        foreach ($query as $action) { $this->settleStorageAction($action, $causalTime, 'auxiliary_destroyed'); }
+        foreach ($query as $action) { $this->settleStorageAction($action, $causalTime, 'auxiliary_destroyed', (int) $target['sql_id']); }
         $now=gmdate('c');$this->persistence->destruction->detachAuxiliaryActions(['now'=>$now,'id'=>(int)$target['sql_id']]);
         $this->persistence->destruction->destroyAuxiliary(['now'=>$now,'id'=>(int)$target['sql_id']]);
         if($this->sectors!==null){$sector=$this->sectorChanges->getOrCreateSector(new SectorCoordinates((int)$target['sector_x'],(int)$target['sector_y'],(int)$target['sector_z']));$wreck=DormantConstruct::fromOthersAuxiliary((string)$target['id'],true);if($sector->findObjectById($wreck->getId())===null){$sector->addObject($wreck);$this->sectorChanges->saveSector($sector);}}
@@ -1628,7 +1628,11 @@ final class OthersService
                 usort($ships, static fn(array $a, array $b): int => (int) $a['id'] <=> (int) $b['id']);
                 foreach ($ships as $ship) { $this->persistence->locks->lock('ship', (int) $ship['id']); }
                 break;
-            case 'others_auxiliary': $this->persistence->locks->lock('auxiliary', (int) $target['sql_id']); break;
+            case 'others_auxiliary':
+                // Deposits settle under carrier -> participants -> action locks.
+                $this->persistence->locks->lock('ship', (int) $target['ship_id']);
+                $this->persistence->locks->lock('auxiliary', (int) $target['sql_id']);
+                break;
             case 'motorized_asteroid': $this->persistence->locks->lock('trajectory', (int) $target['trajectory_id']); break;
             case 'missile':
                 $projectile = $this->persistence->combat->findProjectileByPublicId(['id' => $target['id']]);
@@ -1656,7 +1660,7 @@ final class OthersService
 
         $key="$x:$y:$z";
         $stmt = $this->persistence->target->findShipTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){return ['kind'=>'others_ship','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'departure_engaged'=>(bool)$row['departure_engaged']];}
-        $stmt = $this->persistence->target->findAuxiliaryTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){return ['kind'=>'others_auxiliary','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'sector_x'=>$x,'sector_y'=>$y,'sector_z'=>$z];}
+        $stmt = $this->persistence->target->findAuxiliaryTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($row=$stmt){return ['kind'=>'others_auxiliary','id'=>(string)$row['public_id'],'sql_id'=>(int)$row['id'],'ship_id'=>(int)$row['ship_id'],'sector_x'=>$x,'sector_y'=>$y,'sector_z'=>$z];}
         if(ctype_digit($targetId)&&$this->probes!==null){$probe=$this->probes->findById((int)$targetId);if($probe!==null&&$probe->currentSector->toKey()===$key&&!in_array($probe->status,[ProbeStatus::Dead,ProbeStatus::Accelerating,ProbeStatus::Cruising,ProbeStatus::Decelerating],true)){return ['kind'=>'probe','id'=>$targetId,'departure_engaged'=>$probe->status===ProbeStatus::Preparing];}}
         if($this->mannies!==null){$manny=$this->mannies->findByUid($targetId);if($manny!==null&&$manny->locationType===Manny::LOCATION_SECTOR&&$manny->sector?->toKey()===$key){return ['kind'=>'manny','id'=>$targetId];}}
         $stmt = $this->persistence->target->findProjectileTarget(['id'=>$targetId,'x'=>$x,'y'=>$y,'z'=>$z]);if($stmt){return ['kind'=>'missile','id'=>$targetId];}
@@ -1863,10 +1867,10 @@ final class OthersService
         return $this->storageTransfers ?? throw new \RuntimeException('Sector storage transfer service is required.');
     }
 
-    private function settleStorageAction(array $action, string $now, string $reason): void
+    private function settleStorageAction(array $action, string $now, string $reason, ?int $destroyedAuxiliaryId = null): void
     {
         if ($action['type'] === 'build_germination_depot') { $this->depotService()->completeConstruction((int) $action['id'], $now, $reason); }
-        else { $this->storageTransferService()->completeOthers((int) $action['id'], $now, $reason); }
+        else { $this->storageTransferService()->completeOthers((int) $action['id'], $now, $reason, $destroyedAuxiliaryId); }
     }
 
     private function interruptDepotConstructions(int $shipId, string $now, string $reason): void

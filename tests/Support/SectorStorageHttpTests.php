@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // This scenario uses the API suite's complete router and isolated database.
-(static function () use ($test,$pdo,$players,$probes,$auth,$others,$kernel,$sectorRepository,$germinationDepots,$storageTransfers,$storage,$mannies,$mannyStorageTransfers,$mannyService): void {
+(static function () use ($test,$pdo,$othersService,$scheduledEvents,$players,$probes,$auth,$others,$kernel,$sectorRepository,$germinationDepots,$storageTransfers,$storage,$mannies,$mannyStorageTransfers,$mannyService): void {
     $coordinates=new \VonNeumannGame\Sector\SectorCoordinates(315,7,-8);
     $sectorRepository->save(new \VonNeumannGame\Sector\SectorContent($coordinates));
     $player=$players->createPlayer('storage-http-owner','Storage HTTP owner',null,$coordinates);
@@ -103,6 +103,7 @@ declare(strict_types=1);
     $test->assertEquals('succeeded',$kernel->handle('GET',$lookup,$headers)->body['transfer']['status']??null,'durable transfer result remains available after settlement');
     $test->assertEquals(0.05,$storage->resourceStock($probe,'metals'),'HTTP scenario conserves the resource quantity');
     require __DIR__ . '/ExternalDeuteriumTransferTests.php';
+    require __DIR__ . '/CollectiveDepotHttpTests.php';
     $test->assertEquals(400,$kernel->handle('GET',$probeInventoryPath.'?limit=501',$headers)->status,'inventory bounds its page size');
     $test->assertEquals(400,$kernel->handle('GET',$probeInventoryPath.'?cursor=invalid',$headers)->status,'inventory rejects malformed cursors');
 }) ();

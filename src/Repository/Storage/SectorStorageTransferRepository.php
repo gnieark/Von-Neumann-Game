@@ -12,10 +12,17 @@ final class SectorStorageTransferRepository
 
     public function createOthers(string $publicId, int $playerId, array $actor, array $ship, array $action, int $depotId, string $direction, array $plan, array $resources, array $items, string $startedAt, string $endsAt): int
     {
-        $query = $this->pdo->prepare("INSERT INTO sector_storage_transfers(public_id,player_id,actor_kind,actor_public_id,others_ship_id,others_action_id,external_storage_kind,external_storage_id,direction,status,manifest_json,resources_json,items_json,started_at,ends_at,updated_at) VALUES(?,?,'others_auxiliary',?,?,?,'depot',?,?,'queued',?,?,?,?,?,?)");
-        $query->execute([$publicId, $playerId, $actor['public_id'], $ship['id'], $action['id'], (string) $depotId, $direction,
+        $query = $this->pdo->prepare("INSERT INTO sector_storage_transfers(public_id,player_id,actor_kind,actor_public_id,others_ship_id,others_action_id,external_storage_kind,external_storage_id,direction,status,manifest_json,resources_json,items_json,started_at,ends_at,updated_at) VALUES(?,?,?,?,?,?,'depot',?,?,'queued',?,?,?,?,?,?)");
+        $query->execute([$publicId, $playerId, $action['actor_kind'], $actor['public_id'], $ship['id'], $action['id'], (string) $depotId, $direction,
             json_encode($plan, JSON_THROW_ON_ERROR), json_encode($resources, JSON_THROW_ON_ERROR), json_encode($items, JSON_THROW_ON_ERROR), $startedAt, $endsAt, $startedAt]);
         return (int) $this->pdo->lastInsertId();
+    }
+
+    public function updateManifest(int $id, array $plan, string $now): void
+    {
+        $query = $this->pdo->prepare("UPDATE sector_storage_transfers SET manifest_json=?,version=version+1,updated_at=? WHERE id=? AND status='queued'");
+        $query->execute([json_encode($plan, JSON_THROW_ON_ERROR), $now, $id]);
+        if ($query->rowCount() !== 1) { throw new \RuntimeException('Transfer manifest update invariant violated.'); }
     }
 
     public function createManny(string $publicId, int $playerId, string $mannyUid, int $probeId, int $mannyId, string $externalKind, int|string $externalId, string $objectId, ?int $containerId, ?string $containerUid, string $direction, array $plan, array $resources, array $items, string $startedAt, string $endsAt): int

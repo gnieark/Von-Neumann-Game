@@ -59,7 +59,7 @@ use VonNeumannGame\Sector\SectorGrid;
 final class ApiKernel
 {
     /** Bump when the public API contract changes. */
-    public const API_VERSION = 148;
+    public const API_VERSION = 149;
     private ?ApiRouter $router = null;
     private ?ForumApiController $forumController = null;
     private ?ProbeManniesApiController $probeManniesController = null;
@@ -163,6 +163,7 @@ final class ApiKernel
             ApiRoute::regex('#^/api/others/crafts/([^/]+)$#', ['GET'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCraftResponse($player, $ctx->stringParam(0)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/harvest$#', ['POST', 'DELETE'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $ctx->method === 'POST' ? $this->othersHarvestCreateResponse($player, $ctx->stringParam(0), $ctx->body) : $this->othersHarvestCancelResponse($player, $ctx->stringParam(0))))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/tasks$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryBatchResponse($player, $ctx->stringParam(0), $ctx->body)))),
+            ApiRoute::regex('#^/api/others/ships/([^/]+)/depot-deposits$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersCollectiveDepositResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/auxiliaries/([^/]+)/(repair|mine|recall|recover-dormant-auxiliary|build-germination-depot|depot-deposits|depot-withdrawals)$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersAuxiliaryTaskResponse($player, $ctx->stringParam(0), $ctx->stringParam(1), $ctx->stringParam(2), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory-transfers$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryTransferCreateResponse($player, $ctx->stringParam(0), $ctx->body)))),
             ApiRoute::regex('#^/api/others/ships/([^/]+)/inventory/jettisons$#', ['POST'], fn(ApiRouteContext $ctx): ApiResponse => $this->protectedOthersRoute($ctx, fn(Player $player): ApiResponse => $this->othersCommand($ctx, $player, fn(): ApiResponse => $this->othersInventoryJettisonResponse($player, $ctx->stringParam(0), $ctx->body)))),
@@ -691,6 +692,19 @@ final class ApiKernel
             : new ApiResponse(200, ['auxiliary' => $this->presentOthersAuxiliary($player, $ship, $auxiliary)]);
     }
 
+    private function othersCollectiveDepositResponse(Player $player, string $shipId, ?string $body): ApiResponse
+    {
+        $decoded = json_decode($body ?? '');
+        if (!$decoded instanceof \stdClass || !($decoded->resources ?? null) instanceof \stdClass) {
+            return ApiResponse::error(400, 'bad_request', 'A JSON object with a resources object is required.');
+        }
+        $ship = $this->others?->findShipForPlayer($shipId, $player->id);
+        if ($ship === null) { return ApiResponse::error(404, 'others_ship_not_found', 'Others ship not found.'); }
+        $payload = $this->decodeJsonBody($body);
+        $action = $this->othersService?->storageTransferService()->startCollectiveDeposit($ship, $payload) ?? throw new \RuntimeException('Others storage transfer service is unavailable.');
+        return new ApiResponse(202, ['action' => $this->presentOthersAction($action)]);
+    }
+
     private function othersAuxiliaryTaskResponse(Player $player, string $shipId, string $auxiliaryId, string $task, ?string $body): ApiResponse
     {
         if (in_array($task,['repair','build-germination-depot','depot-deposits','depot-withdrawals'],true)) {
@@ -1171,7 +1185,7 @@ final class ApiKernel
         }
         if (in_array($action['type'], ['depot_deposit', 'depot_withdrawal'], true)) {
             $payload = json_decode($action['payload_json'], true, 512, JSON_THROW_ON_ERROR);
-            $result['transfer'] = array_intersect_key($payload, array_flip(['depotId', 'resources', 'itemIds', 'capacityEce', 'roundTrips', 'durationSeconds']));
+            $result['transfer'] = array_intersect_key($payload, array_flip(['depotId', 'resources', 'itemIds', 'capacityEce', 'roundTrips', 'durationSeconds', 'auxiliaryCount', 'auxiliaryIds']));
         }
         foreach (['ends_at' => 'endsAt', 'cancelable_until' => 'cancelableUntil', 'completed_at' => 'completedAt'] as $column => $field) {
             if (($action[$column] ?? null) !== null) { $result[$field] = (string) $action[$column]; }

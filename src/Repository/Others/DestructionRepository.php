@@ -34,7 +34,7 @@ final class DestructionRepository
     /** @param array<string|int, mixed> $parameters @return list<array<string, mixed>> */
     public function findAuxiliaryStorageActions(array $parameters): array
     {
-        $statement = $this->pdo->prepare("SELECT id,type FROM others_actions WHERE auxiliary_id=? AND type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND status IN ('queued','running')");
+        $statement = $this->pdo->prepare("SELECT a.id,a.type FROM others_actions a JOIN others_auxiliaries u ON u.current_action_id=a.id WHERE u.id=? AND a.type IN ('build_germination_depot','depot_deposit','depot_withdrawal') AND a.status IN ('queued','running')");
         $statement->execute($parameters);
         return $statement->fetchAll();
     }
