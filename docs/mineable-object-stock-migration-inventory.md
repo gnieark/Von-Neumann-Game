@@ -1,6 +1,6 @@
 # Stocks minables SQL — inventaire du lot 0
 
-Date : 16 octobre 2026. Mise à jour : 18 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’à la préparation du lot 7 ; aucune bascule de production n’a été exécutée. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
+Date : 16 octobre 2026. Mise à jour : 19 octobre 2026. Ce rapport conserve l’inventaire initial et suit les adaptations réalisées jusqu’à la bascule de production du lot 7, effectuée après autorisation explicite de l’utilisateur. Les sections datées du 18 octobre décrivent la préparation avant cette autorisation. Le plan directeur reste `var/doc-diverse-non-publiée/plan-migration-stocks-asteroides-sql.md`.
 
 ## Périmètre et écarts constatés
 
@@ -464,3 +464,50 @@ Le premier essai en lecture seule sur les tables courantes de développement a c
 Commandes de validation : `php tests/SectorTests.php` et `php tests/MineableCutoverMysqlTests.php --mysql-config=config/database.json` (développement uniquement). Journaux : `/tmp/vng-lot7-sector.log`, `/tmp/vng-lot7-monitor-mariadb.log`. Aucun commit ni push réalisé par l’assistant. La modification préexistante de `.gitignore` est conservée.
 
 **À compléter après exécution par l’opérateur :** révisions et heures effectives, manifeste de production et résultats de conversion, minages/rappels de contrôle, remise en service de chaque writer, métriques et erreurs des premières fenêtres puis suivi à J+1. La production ne pourra être déclarée basculée qu’après ces validations.
+
+## Lot 7 — Exécution en production, 19 octobre
+
+**Bascule effectuée après autorisation explicite de l’utilisateur**, qui remplace la décision de préparation seule du 18 octobre. L’arrêt temporaire des autres vhosts de `lnmp2` et une éventuelle perte de leurs écritures récentes lors d’un retour aux snapshots ont été autorisés. Aucun retour arrière n’a été nécessaire.
+
+Révision précédente : `530e36ae4f051791d4a66edc1276254a9215f122`. Révision livrée : **`1200b367df8d1327ad223374040998a8ab2f3edb`**, branche locale `removestoragesfromjsons`. Le lot 7 préparatoire a été commité pour figer cette livraison ; aucun push GitHub effectué. Un bundle incrémental vérifié a été importé sous `www-data` dans la référence `cutover/removestoragesfromjsons`, puis la production a été placée en HEAD détachée sur cette révision. SHA-256 du bundle : `1d609cd7a33f28f72ed46e236e0b48486585470db7f15c4b64d346054bf8bc40`. La modification locale préexistante de `.gitignore` est conservée.
+
+Application : `/var/www/neumann-probe.tinad.fr`, univers `data/universe`, base `neumannprod` sur MariaDB **10.11.19**, PHP **8.4.26**. Le domaine effectif est **`https://neumann-probe.net`** ; nginx écoute sur le port interne **8006**. L’ancien nom du dossier ne constitue pas le nom DNS public. Aucun changement des secrets ni de la connexion SQL ; les seules options de configuration versionnées ajoutées sont celles des reprises de minage. Composer n’étant pas installé et les deux fichiers de dépendances étant identiques à la version précédente, `vendor` a été conservé après sauvegarde et contrôle du chargement des nouvelles classes par l’autoloader non autoritaire.
+
+Protection et déroulement, heures UTC (ajouter deux heures pour Paris ce jour-là) :
+
+- **07:46:51** : nginx, PHP-FPM, scheduler et cron arrêtés proprement, sans processus PHP résiduel ni autre connexion SQL visible du compte applicatif. Contrôleurs Others suspendus avec leur VM `neumanothers`.
+- Arrêt gracieux des VM **`lnmp2` et `mariadb2`**, puis snapshots internes QCOW2 hors ligne **`neumann-stocks-before-20261019-lot7`** sur les deux VM. Métadonnées vérifiées. Redémarrage en maintenance avec marqueur persistant et conditions systemd empêchant la reprise des quatre services.
+- Simulation réussie en **118,158 s**, sans ambiguïté ni résolution manuelle supplémentaire.
+- **07:52:52–08:01:35** : sauvegarde et application en **522,856 s** ; pic mémoire PHP **742 412 288 octets**. Sauvegarde en 41,748 s, import des stocks en 85,408 s, remplacement des descripteurs en 172,470 s. Les phases s’exécutent sous une unité systemd ponctuelle `www-data`, indépendante de la connexion SSH.
+- Vérification indépendante réussie en **13,490 s**, puis contrôle `--before-open` avec `verified: true`. Le seul avertissement était le retard accumulé pendant la maintenance : 190 événements dus, dont 13 depuis plus de quinze minutes. Aucun stock invalide, identité manquante, bail expiré, effet de secteur en attente ou événement Manny en échec.
+- **08:03:07** : reprise du scheduler seul. À 08:03:37, aucun événement dû restant ni signal d’alerte ; les **17 pertes de sondes** préparées par la migration sont terminées.
+- **08:05:23** : reprise PHP-FPM/nginx et des accès web, soit environ **18 min 32 s** d’arrêt de ces services. **08:06:54** : reprise cron, puis de la VM Others. Gardes temporaires retirées et archivées. Les services retrouvent leur état actif et leur activation au démarrage ; aucun redémarrage automatique observé.
+
+Résultats de conversion :
+
+| Élément | Résultat |
+| --- | --- |
+| Sauvegarde SQL complète | 72 tables, **4 117 834 lignes** |
+| Secteurs vérifiés/sauvegardés | **209 293 fichiers** |
+| Descripteurs préparés par le plan | 44 472 fichiers |
+| Stocks importés | **84 949** : 84 947 astéroïdes et 2 épaves |
+| Identités historiques réservées | 94 100, aucun renommage nécessaire |
+| Références SQL converties | 1 580 lignes |
+| Normalisations de ressources | 72, selon la règle d’épuisement arbitrée au lot 0 |
+| Mannies oubliées converties | 45 |
+| Événement Manny en échec | `1934570`, Manny `3496` : annulé, rappel métier terminé à l’état libre, sans événement de retour nécessaire |
+
+Les totaux importés et revérifiés sont identiques : deutérium **33 796 576,0931**, métaux **553 813 514,4699**, glace **130 046 202,3220**, composés carbonés **124 641 754,2686**. Les 27 trajectoires d’astéroïdes en transit sont préservées. Les stocks planétaires et le moissonnage collectif Others restent hors périmètre.
+
+Contrôles après reprise :
+
+- Rapports `live-first` et `live-second` : **`ok`**, aucun nouvel événement en échec, stock invalide, identité manquante, conflit persistant, admission expirée, publication ou perte de sonde en attente. Le nombre de stocks passe légitimement à 84 954 avec cinq créations après reprise ; aucune vérification contre les anciens montants du manifeste n’est exécutée après ouverture.
+- Relevés SQL cohérents en lecture seule avant reprise et à 08:04:59 : neuf stocks ont changé de version. Sur les groupes de minage d’une épave et d’un astéroïde, les débits correspondent exactement aux crédits de leurs conteneurs détachés, pour les quatre ressources : **9,6380 métaux vers 11 conteneurs** et **0,8000 métal vers 16 conteneurs**. Les versions des sources passent respectivement de 1 à 150 et de 1 à 17. Il s’agit de livraisons du jeu en cours, sans création de compte ni ordre de minage supplémentaire. Les identifiants et vecteurs complets restent dans les preuves privées.
+- Première fenêtre de **344 s** depuis la reprise du scheduler : **291 mesures de succès**, dont **219 exécutions terminées**, zéro conflit SQL, erreur permanente, alerte ou ligne métrique invalide. Durée totale p50 **33,186 ms**, p95 **112,133 ms**, p99 **133,652 ms** ; admission p95 **4,983 ms**, transaction p95 **104,335 ms**. Les autres succès sont des reports métier normaux. Ces mesures ne constituent pas un comparatif avant/après ni un test de charge.
+- Dernière fenêtre cumulée de **638 s** : **356 mesures de succès**, dont **224 exécutions terminées**, toujours zéro conflit, erreur permanente, alerte ou mesure invalide ; durée p50 **32,044 ms**, p95 **110,927 ms**, p99 **133,652 ms**. Contrôle SQL `live-final` à **08:13:48** : **`ok`**, aucun avertissement ni anomalie, aucun événement dû en retard.
+- Backend HTTP : API v148. Depuis l’hyperviseur, HTTPS public via reverse proxy : API v148 et page d’accueil **HTTP 200**, certificats vérifiés normalement. L’accès direct au domaine public depuis la VM de développement expire ; le contrôle HTTPS a donc été effectué depuis l’hyperviseur. Aucune configuration DNS/réseau n’a été modifiée.
+- À 08:10:29, journal nginx depuis la réouverture : **1 382 réponses 2xx**, **68 réponses 4xx**, **aucune 5xx** et aucune entrée d’erreur nginx. Une requête API Others réussie est observée après reprise de son contrôleur. Les trois VM sont en cours d’exécution.
+
+Preuves privées de production : **`/var/backups/neumann-stocks/20261019-lot7/`**, avec code/configuration/dépendances antérieurs, bundle, sorties et journaux de chaque phase, manifeste **`migration/manifest.json`**, sauvegarde complète **`migration/backup/`**, plan, reçus et rapports de surveillance. Métadonnées des snapshots sur l’hyperviseur : `/data/backups/neumann-stocks-20261019/`. Scripts et relevés d’exploitation locaux : `var/lot7-production-20261019/`, ignorés par Git. Les snapshots et sauvegardes sont conservés.
+
+**Suivi restant : contrôle à J+1 et surveillance prolongée.** La bascule et les premiers contrôles sont terminés ; aucune observation future n’est présumée acquise. Les scénarios exhaustifs de concurrence/destruction/restauration restent couverts par les suites et la répétition des lots précédents ; ils ne sont pas rejoués sur les joueurs de production. Un retour aux snapshots après reprise perdrait les nouvelles écritures des VM concernées ; il faut arrêter à nouveau les writers, préserver les diagnostics et restaurer les deux VM ensemble. Les snapshots contiennent les gardes systemd : supprimer le marqueur et les quatre fichiers `90-neumann-cutover.conf` uniquement après validation de l’ancien couple code/données, puis rétablir les services et les contrôleurs.

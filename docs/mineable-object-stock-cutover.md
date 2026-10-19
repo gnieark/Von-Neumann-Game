@@ -1,6 +1,10 @@
 # Lot 7 — Bascule des stocks minables en production
 
-**Exécution par l’opérateur, conformément à la décision du 18 octobre 2026.** Les outils et cette procédure sont préparés et testés ; la bascule de production n’a pas été exécutée. La répétition complète, les deux reprises et la restauration du lot 6 sont consignées dans [le rapport](mineable-object-stock-migration-inventory.md#lot-6--migration-explicite-et-répétition-complète-18-octobre).
+**Bascule effectuée le 19 octobre 2026, après autorisation explicite de l’utilisateur.** La préparation initiale du 18 octobre confiait l’exécution à l’opérateur ; l’utilisateur a ensuite autorisé l’assistant à effectuer la maintenance, les snapshots et la migration. Le compte rendu effectif figure dans [le rapport](mineable-object-stock-migration-inventory.md#lot-7--exécution-en-production-19-octobre). La répétition complète, les deux reprises et la restauration du lot 6 y sont également consignées.
+
+Pour cette intervention, les VM `lnmp2` et `mariadb2` ont été arrêtées proprement puis sauvegardées par snapshots internes hors ligne `neumann-stocks-before-20261019-lot7`. La VM des contrôleurs `neumanothers` a été suspendue pendant la maintenance, puis reprise. Des conditions systemd persistantes ont empêché le redémarrage de nginx, PHP-FPM, du scheduler et de cron après le redémarrage des VM : les masques `--runtime` des exemples ci-dessous ne suffiraient pas dans ce cas. Les gardes de la session ont été levées progressivement. Les snapshots les contiennent encore ; une restauration exige leur levée explicite après vérification du couple code/données. L’utilisateur a accepté l’indisponibilité des autres vhosts et la perte éventuelle de leurs écritures récentes en cas de restauration.
+
+La révision livrée est `1200b367df8d1327ad223374040998a8ab2f3edb`, importée par bundle Git vérifié depuis la VM de développement, sans push GitHub. Git et PHP s’exécutent sous `www-data`. Les dépendances Composer sont conservées : `composer.json` et `composer.lock` sont identiques à la révision précédente, l’autoloader existant n’est pas autoritaire et le chargement des nouvelles classes a été vérifié. Les commandes ci-dessous restent un guide général ; les écarts et résultats de cette session sont consignés au rapport.
 
 Paramètres confirmés : application `/var/www/neumann-probe.tinad.fr/`, propriétaire et compte Git `www-data`, scheduler `php-vhost-neumann-probe-scheduler`, PHP-FPM `php8.4-fpm`. Le compte `www-data` possède la clé GitHub. Exécuter les blocs séparément, en contrôlant les résultats avant le bloc suivant ; conserver les variables de cette session. Les commandes serveur suivantes sont à exécuter dans un shell Bash administrateur ; Git, Composer et PHP sont exécutés sous `www-data`. L’arrêt de nginx et de PHP-FPM porte sur ces services entiers.
 
@@ -169,7 +173,7 @@ Quand ce premier palier est validé :
 systemctl unmask --runtime "$FPM" nginx
 systemctl start "$FPM"
 systemctl start nginx
-curl --fail --silent --show-error https://neumann-probe.tinad.fr/api/version
+curl --fail --silent --show-error https://neumann-probe.net/api/version
 ```
 
 Vérifier la réponse API v148 puis, avec un compte de contrôle, les observations d’un astéroïde et d’une épave, les stocks/cargaisons, une petite mission de minage suivie jusqu’à livraison, et un rappel. Si disponible, vérifier une Manny oubliée et un conteneur détaché. Consigner les IDs publics, quantités avant/après et événements concernés dans le rapport privé ; ne pas publier de coordonnées absolues. Le débit doit correspondre à la livraison et les relectures ne doivent pas recréer de stock. Ne pas lancer les suites de tests du dépôt contre la production.

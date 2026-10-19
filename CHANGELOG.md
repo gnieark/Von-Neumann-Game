@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-19
+
+### Changed
+
+- Stocks minables SQL, lot 7 : bascule de production effectuée après arrêt des écritures, snapshots hors ligne des VM applicative/SQL et sauvegarde complète SQL/secteurs. 84 949 stocks importés, 45 Mannies oubliées converties et un événement Manny en échec annulé avec rappel métier. Vérifications intégrales réussies, reprise progressive de tous les services et contrôles de livraisons réelles avec égalité débit/crédit. Contrat API inchangé (v148). Compte rendu et limites de surveillance dans `docs/mineable-object-stock-migration-inventory.md`.
+
 ## 2026-10-18
 
 ### Changed
