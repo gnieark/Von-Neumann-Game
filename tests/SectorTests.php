@@ -961,6 +961,7 @@ require __DIR__ . '/Support/MineableLifecycleTests.php';
 require __DIR__ . '/Support/MiningAtomicTests.php';
 require __DIR__ . '/Support/ProbeLossTests.php';
 require __DIR__ . '/Support/MiningRetryTests.php';
+require __DIR__ . '/Support/CraftingRetryTests.php';
 require __DIR__ . '/Support/MineableStockMigrationTests.php';
 require __DIR__ . '/Support/MineableCutoverTests.php';
 $test->printSummary();

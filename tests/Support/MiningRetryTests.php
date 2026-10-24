@@ -4,14 +4,14 @@ declare(strict_types=1);
 use VonNeumannGame\Database\SchemaInitializer;
 use VonNeumannGame\Database\StorageTransaction;
 use VonNeumannGame\Domain\MineableResourceAmounts;
-use VonNeumannGame\Database\MiningRetryPolicy;
+use VonNeumannGame\Database\SchedulerRetryPolicy;
 use VonNeumannGame\Sector\Asteroid;
 use VonNeumannGame\Sector\SectorContent;
 use VonNeumannGame\Sector\SectorCoordinates;
 
 require_once __DIR__ . '/MiningRetryFixture.php';
 (static function () use ($test): void {
-    $policy = new MiningRetryPolicy();
+    $policy = new SchedulerRetryPolicy();
     foreach ([1 => [1, 1], 2 => [4, 6], 3 => [12, 18], 4 => [48, 72], 5 => [240, 300], 100 => [240, 300]] as $count => [$min, $max]) {
         $delays = array_map(fn() => $policy->delay($count), range(1, 30));
         $test->assert(min($delays) >= $min && max($delays) <= $max, 'bounded jitter at conflict ' . $count);
@@ -19,9 +19,9 @@ require_once __DIR__ . '/MiningRetryFixture.php';
     foreach ([1205, 1213, 3572, 1062, 1452, 2006] as $code) {
         $error = new PDOException('secret'); $error->errorInfo = ['HY000', $code, 'secret'];
         $wrapped = new \VonNeumannGame\Database\StorageBusyException('generic', 0, $error);
-        $test->assertEquals(in_array($code, [1205, 1213, 3572], true), MiningRetryPolicy::conflict($wrapped, 'mysql') !== null, 'classify native SQL code ' . $code);
+        $test->assertEquals(in_array($code, [1205, 1213, 3572], true), SchedulerRetryPolicy::conflict($wrapped, 'mysql') !== null, 'classify native SQL code ' . $code);
     }
-    $test->assertEquals(null, MiningRetryPolicy::conflict(new RuntimeException('1213 deadlock'), 'mysql'), 'message matching never retries business errors');
+    $test->assertEquals(null, SchedulerRetryPolicy::conflict(new RuntimeException('1213 deadlock'), 'mysql'), 'message matching never retries business errors');
 
     $db = new MiningRetryFaultPdo(); (new SchemaInitializer('sqlite'))->initialize($db);
     $directory = sys_get_temp_dir() . '/vng-mining-retry-' . bin2hex(random_bytes(6));
@@ -38,7 +38,7 @@ require_once __DIR__ . '/MiningRetryFixture.php';
     $event = miningRetryDue($db, $f, $manny);
     $taskEndsAt = $f['mannies']->findById($manny->id)->taskEndsAt;
     $before = clone $event;
-    $context = $f['events']->miningContext($event);
+    $context = $f['events']->retryableTaskContext($event);
     try {
         for ($i = 1; $i <= 6; $i++) {
             if ($i > 1) { $db->prepare('UPDATE scheduled_events SET run_at=? WHERE id=?')->execute([gmdate('c', time() - 1), $event->id]); }
@@ -58,7 +58,7 @@ require_once __DIR__ . '/MiningRetryFixture.php';
         $test->assertEquals(1, count(array_filter($records, fn($r) => $r['alert'] ?? false)), 'one alert after fifteen minutes, retries continue');
         $test->assert(!str_contains(json_encode($records), 'secret'), 'diagnostics exclude SQL messages and payloads');
         $test->assertEquals('mineable_stock', $records[0]['lock_family'], 'diagnostic identifies the failed stock lock family');
-        $test->assertEquals(null, $f['events']->deferMiningConflict($before, $context, ['sql_code' => 5], $policy), 'stale report cannot overwrite a later retry');
+        $test->assertEquals(null, $f['events']->deferTaskConflict($before, $context, ['sql_code' => 5], $policy), 'stale report cannot overwrite a later retry');
 
         $db->prepare('UPDATE scheduled_events SET run_at=? WHERE id=?')->execute([gmdate('c', time() - 1), $event->id]);
         $stats = $scheduler->processDueEvents();
@@ -85,7 +85,7 @@ require_once __DIR__ . '/MiningRetryFixture.php';
             $test->assertEquals(1, $scheduler->processDueEvents()['deferred'], $phase . ' conflict is deferred');
             $test->assertEquals(9.9, $f['stocks']->find($rock->getId())['amounts']['metals'], $phase . ' conflict has no debit');
             $f['mining']->recallManny($probe, $manny->uid);
-            $test->assertEquals(null, $f['events']->deferMiningConflict($event, $context, ['sql_code' => 5], $policy), 'recall dominates a late report');
+            $test->assertEquals(null, $f['events']->deferTaskConflict($event, $context, ['sql_code' => 5], $policy), 'recall dominates a late report');
         }
 
         // A normal incomplete task clears the series without postponing its business end.
@@ -147,11 +147,11 @@ require_once __DIR__ . '/MiningRetryFixture.php';
         // A newer lease, including one held by the same worker, fences old reports.
         [$probe, $manny] = miningAtomicActor($f, 'retry-lease', $sector);
         $manny = $f['mining']->startMining($probe, $manny->uid, $rock->getId(), 'metals', 0.1);
-        $event = miningRetryDue($db, $f, $manny); $context = $f['events']->miningContext($event);
+        $event = miningRetryDue($db, $f, $manny); $context = $f['events']->retryableTaskContext($event);
         $old = clone $event; $claimed = $f['events']->claim($event);
-        $test->assertEquals(null, $f['events']->deferMiningConflict($old, $context, ['sql_code' => 5], $policy), 'new live claim fences old report');
+        $test->assertEquals(null, $f['events']->deferTaskConflict($old, $context, ['sql_code' => 5], $policy), 'new live claim fences old report');
         $f['events']->release($claimed, $old->runAt, $claimed->payload);
-        $test->assertEquals(null, $f['events']->deferMiningConflict($old, $context, ['sql_code' => 5], $policy), 'released newer claim still fences old report');
+        $test->assertEquals(null, $f['events']->deferTaskConflict($old, $context, ['sql_code' => 5], $policy), 'released newer claim still fences old report');
         $newClaim = $f['events']->claim($f['events']->findById($event->id));
         foreach (['release', 'done', 'failed'] as $transition) {
             try {
@@ -169,7 +169,7 @@ require_once __DIR__ . '/MiningRetryFixture.php';
         $f['events']->release($newClaim, $old->runAt, $newClaim->payload);
         $old = $f['events']->findById($event->id);
         (new \VonNeumannGame\Repository\ProbeOperationRepository($db))->close($probe->id);
-        $test->assertEquals(null, $f['events']->deferMiningConflict($old, $context, ['sql_code' => 5], $policy), 'closed admissions prevent new retry');
+        $test->assertEquals(null, $f['events']->deferTaskConflict($old, $context, ['sql_code' => 5], $policy), 'closed admissions prevent new retry');
         $test->assertEquals(0, $scheduler->processDueEvents()['due'], 'closed probe is left to destruction cleanup');
     } finally {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);

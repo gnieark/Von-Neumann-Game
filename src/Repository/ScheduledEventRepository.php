@@ -124,20 +124,21 @@ final class ScheduledEventRepository
     public function databaseDriver(): string { return $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME); }
 
     /** Bounded diagnostic context and eligibility before admission; execution revalidates the task. */
-    public function miningContext(ScheduledEvent $event): ?array
+    public function retryableTaskContext(ScheduledEvent $event): ?array
     {
         if ($event->type !== 'manny.task' || $event->entityType !== 'manny') { return null; }
-        $stmt = $this->pdo->prepare("SELECT mt.id AS task_id, m.probe_id, m.uid AS manny, mt.object_id
+        $stmt = $this->pdo->prepare("SELECT mt.id AS task_id, m.probe_id, m.uid AS manny, mt.object_id, mt.task_type, mt.crafting_run_id
             FROM manny_tasks mt JOIN mannies m ON m.id=mt.manny_id
-            WHERE mt.scheduled_event_id=? AND mt.manny_id=? AND mt.task_type='mining' AND m.probe_id IS NOT NULL");
+            WHERE mt.scheduled_event_id=? AND mt.manny_id=? AND mt.task_type IN ('mining','crafting','assisting_atomic_printer')
+                AND m.current_task=mt.task_type AND m.task_scheduled_event_id=mt.scheduled_event_id AND m.probe_id IS NOT NULL");
         $stmt->execute([$event->id, $event->entityId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
-    /** The claim rolled back with mining. Never reclaim/overwrite a newer worker's event. */
-    public function deferMiningConflict(ScheduledEvent $before, array $context, array $conflict, \VonNeumannGame\Database\MiningRetryPolicy $policy): ?array
+    /** The claim rolled back with the task. Never reclaim/overwrite a newer worker's event. */
+    public function deferTaskConflict(ScheduledEvent $before, array $context, array $conflict, \VonNeumannGame\Database\SchedulerRetryPolicy $policy): ?array
     {
-        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback mining before reporting a conflict.'); }
+        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback the task before reporting a conflict.'); }
         $now = time();
         $count = $before->conflictCount + 1;
         $since = $before->conflictStartedAt ?? gmdate('c', $now);
@@ -146,32 +147,45 @@ final class ScheduledEventRepository
         $delay = $policy->delay($count);
         $diagnostic = $conflict + [
             'event_id' => $before->id, 'manny' => $context['manny'], 'object_id' => $context['object_id'],
+            'task_type' => $context['task_type'], 'crafting_run_id' => $context['crafting_run_id'],
             'probe_id' => (int) $context['probe_id'], 'conflict_count' => $count,
             'conflict_age_seconds' => $age, 'retry_delay_seconds' => $delay, 'alert' => $alert,
         ];
         $stmt = $this->pdo->prepare("UPDATE scheduled_events SET run_at=?, conflict_count=?, conflict_started_at=?,
             conflict_alerted_at=?, last_error=?, updated_at=?
             WHERE id=? AND status='pending' AND attempts=? AND conflict_count=? AND run_at=?
-            AND EXISTS (SELECT 1 FROM manny_tasks mt JOIN mannies m ON m.id=mt.manny_id
-                JOIN probe_operation_gates g ON g.probe_id=m.probe_id AND g.closed=0
-                WHERE mt.id=? AND mt.scheduled_event_id=scheduled_events.id AND mt.task_type='mining' AND m.probe_id=?)");
+            AND " . $this->retryableTaskCondition());
         $stmt->execute([
             gmdate('c', $now + $delay), $count, $since, $alert ? gmdate('c', $now) : $before->conflictAlertedAt,
             json_encode($diagnostic, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), gmdate('c', $now),
-            $before->id, $before->attempts, $before->conflictCount, $before->runAt, $context['task_id'], $context['probe_id'],
+            $before->id, $before->attempts, $before->conflictCount, $before->runAt, ...$this->retryableTaskParameters($context),
         ]);
         return $stmt->rowCount() === 1 ? $diagnostic : null;
     }
 
-    public function failRolledBackMining(ScheduledEvent $before, \Throwable $error): bool
+    public function failRolledBackTask(ScheduledEvent $before, array $context, \Throwable $error): bool
     {
-        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback mining before reporting failure.'); }
+        if ($this->pdo->inTransaction()) { throw new \LogicException('Rollback the task before reporting failure.'); }
         $stmt = $this->pdo->prepare("UPDATE scheduled_events SET status='failed', processed_at=?, last_error=?, updated_at=?
-            WHERE id=? AND status='pending' AND attempts=? AND conflict_count=? AND run_at=?");
+            WHERE id=? AND status='pending' AND attempts=? AND conflict_count=? AND run_at=? AND " . $this->retryableTaskCondition());
         // Error class and business code suffice; raw PDO messages can contain SQL and bound values.
         $message = $error instanceof \VonNeumannGame\Service\MannyActionException ? $error->errorCode : get_class($error);
-        $stmt->execute([gmdate('c'), $message, gmdate('c'), $before->id, $before->attempts, $before->conflictCount, $before->runAt]);
+        $stmt->execute([gmdate('c'), $message, gmdate('c'), $before->id, $before->attempts, $before->conflictCount, $before->runAt, ...$this->retryableTaskParameters($context)]);
         return $stmt->rowCount() === 1;
+    }
+
+    private function retryableTaskCondition(): string
+    {
+        return "EXISTS (SELECT 1 FROM manny_tasks mt JOIN mannies m ON m.id=mt.manny_id
+            JOIN probe_operation_gates g ON g.probe_id=m.probe_id AND g.closed=0
+            WHERE mt.id=? AND mt.scheduled_event_id=scheduled_events.id AND mt.task_type=? AND m.probe_id=?
+                AND m.id=scheduled_events.entity_id AND m.current_task=mt.task_type AND m.task_scheduled_event_id=scheduled_events.id
+                AND (mt.crafting_run_id=? OR (mt.crafting_run_id IS NULL AND ? IS NULL)))";
+    }
+
+    private function retryableTaskParameters(array $context): array
+    {
+        return [$context['task_id'], $context['task_type'], $context['probe_id'], $context['crafting_run_id'], $context['crafting_run_id']];
     }
 
     public function claim(ScheduledEvent $event): ?ScheduledEvent

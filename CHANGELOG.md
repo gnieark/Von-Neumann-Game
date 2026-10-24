@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-24
+
+### Fixed
+
+- Scheduler : les conflits SQL temporaires des fabrications Manny et de l’imprimante atomique sont désormais repris automatiquement après rollback complet, comme le minage transactionnel. La reprise conserve les ingrédients déjà consommés au lancement, la réservation et l’identité de fabrication ; elle ne double pas la livraison et respecte rappels et destructions. Délais progressifs plafonnés à cinq minutes, alerte après quinze minutes de conflits et diagnostics internes `scheduler_crafting`. Configuration : `schedulerCraftingRetryDelays` et `schedulerCraftingConflictAlertSeconds`. Les erreurs métier et d’intégrité restent distinctes. Aucune migration de schéma ni modification du contrat API (v149) ; les événements déjà en échec nécessitent toujours une reprise administrative explicite. Détails : `docs/scheduler-sql-retries.md`.
+
 ## 2026-10-19
 
 ### Changed
