@@ -4,20 +4,20 @@ declare(strict_types=1);
 
 namespace VonNeumannGame\Database;
 
-/** Only the scheduler's atomic mining path may use this policy. */
-final class MiningRetryPolicy
+/** Only scheduler handlers whose effects roll back with their claim may use this policy. */
+final class SchedulerRetryPolicy
 {
     public function __construct(
         private readonly array $delays = [1, 5, 15, 60, 300],
         public readonly int $alertAfterSeconds = 900,
     ) {
         if ($delays === [] || !array_is_list($delays) || $alertAfterSeconds < 1) {
-            throw new \InvalidArgumentException('Invalid mining retry configuration.');
+            throw new \InvalidArgumentException('Invalid scheduler retry configuration.');
         }
         $previous = 0;
         foreach ($delays as $delay) {
             if (!is_int($delay) || $delay < max(1, $previous) || $delay > 300) {
-                throw new \InvalidArgumentException('Mining retry delays must increase and stay within 1..300 seconds.');
+                throw new \InvalidArgumentException('Scheduler retry delays must increase and stay within 1..300 seconds.');
             }
             $previous = $delay;
         }
@@ -32,14 +32,14 @@ final class MiningRetryPolicy
     }
 
     /** No message matching: integrity/business errors must never become retries. */
-    public static function conflict(\Throwable $error, string $driver): ?array
+    public static function conflict(\Throwable $error, string $driver, string $defaultLockFamily = 'mining_transaction'): ?array
     {
         while ($error instanceof StorageBusyException && $error->getPrevious() !== null) { $error = $error->getPrevious(); }
         if (!$error instanceof \PDOException) { return null; }
         $code = (int) ($error->errorInfo[1] ?? 0);
         $allowed = match ($driver) { 'mysql' => [1205, 1213, 3572], 'sqlite' => [5, 6], default => [] };
         if (!in_array($code, $allowed, true)) { return null; }
-        $family = 'mining_transaction';
+        $family = $defaultLockFamily;
         foreach ($error->getTrace() as $frame) {
             $class = $frame['class'] ?? '';
             $function = $frame['function'] ?? '';

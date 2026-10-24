@@ -1946,7 +1946,7 @@ final class MannyService implements MannyTaskRuntime
         });
     }
 
-    public function refreshScheduledMannyTask(ScheduledEvent $event): ?Manny
+    public function refreshScheduledMannyTask(ScheduledEvent $event, bool &$retrySafe = false): ?Manny
     {
         if ($event->entityType !== 'manny') {
             throw new \RuntimeException('Invalid entity type for Manny task event: ' . $event->entityType);
@@ -1960,7 +1960,7 @@ final class MannyService implements MannyTaskRuntime
             return $manny;
         }
         if ($manny->currentTask === Manny::TASK_MINING) {
-            $this->processScheduledMiningTask($event);
+            $this->processScheduledMiningTask($event, $retrySafe);
             return $this->mannies->findById($event->entityId);
         }
 
@@ -1970,9 +1970,14 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $events = $this->scheduledEvents ?? throw new \LogicException('Task execution requires scheduler fencing.');
-        return $this->probes->withProbeGuards($events->probeIdsFor($event), function () use ($manny, $probe, $event, $events): Manny {
-            return $this->withTaskLock($manny, $probe, function (Manny $current, NeumannProbe $currentProbe) use ($event, $events): Manny {
+        // These handlers only write SQL. Admission owns their claim, output, task
+        // and acknowledgement in one transaction; a conflict rolls all of them back.
+        $retrySafe = in_array($manny->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER], true);
+        return $this->probes->withProbeGuards($events->probeIdsFor($event), function () use ($manny, $probe, $event, $events, &$retrySafe): Manny {
+            return $this->withTaskLock($manny, $probe, function (Manny $current, NeumannProbe $currentProbe) use ($event, $events, &$retrySafe): Manny {
                 $events->lockOwned($event);
+                if ($current->taskScheduledEventId !== $event->id || $current->currentTask === null) { return $current; }
+                $retrySafe = in_array($current->currentTask, [Manny::TASK_CRAFTING, Manny::TASK_ASSISTING_ATOMIC_PRINTER], true);
                 return $this->taskRefresher->refreshAllowingOutOfRange($current, $currentProbe);
             });
         });

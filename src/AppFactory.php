@@ -260,7 +260,8 @@ final class AppFactory
         );
 
         return new SchedulerService($scheduledEvents, $probes, $movements, $movementService, $mannyService, $trajectoryProcessor, $othersService, $sectorEffects, $anomalyBroadcasts,
-            new \VonNeumannGame\Database\MiningRetryPolicy($appConfig['schedulerMiningRetryDelays'] ?? [1, 5, 15, 60, 300], $appConfig['schedulerMiningConflictAlertSeconds'] ?? 900));
+            new \VonNeumannGame\Database\SchedulerRetryPolicy($appConfig['schedulerMiningRetryDelays'] ?? [1, 5, 15, 60, 300], $appConfig['schedulerMiningConflictAlertSeconds'] ?? 900),
+            craftingRetries: new \VonNeumannGame\Database\SchedulerRetryPolicy($appConfig['schedulerCraftingRetryDelays'] ?? [1, 5, 15, 60, 300], $appConfig['schedulerCraftingConflictAlertSeconds'] ?? 900));
     }
 
     public function authService(PDO $pdo): AuthService

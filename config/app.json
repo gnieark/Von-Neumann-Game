@@ -6,5 +6,7 @@
   "schedulerLeaseSeconds": 3600,
   "schedulerRecoveryIntervalSeconds": 60,
   "schedulerMiningRetryDelays": [1, 5, 15, 60, 300],
-  "schedulerMiningConflictAlertSeconds": 900
+  "schedulerMiningConflictAlertSeconds": 900,
+  "schedulerCraftingRetryDelays": [1, 5, 15, 60, 300],
+  "schedulerCraftingConflictAlertSeconds": 900
 }

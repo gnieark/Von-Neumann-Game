@@ -6,7 +6,7 @@ require_once __DIR__ . '/MiningRetryFixture.php';
 /** Signals the source lock request without changing the actual server-side locking. */
 final class MiningRetrySignalStatement extends PDOStatement
 {
-    protected function __construct(private string $source, private string $marker) {}
+    protected function __construct(private int|string $source, private string $marker) {}
     public function execute(?array $params = null): bool
     {
         if ($params === [$this->source] && str_contains($this->queryString, 'FOR UPDATE')) { file_put_contents($this->marker, 'locking'); }
