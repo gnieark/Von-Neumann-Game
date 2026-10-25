@@ -391,9 +391,11 @@ final class ScheduledEventRepository
         return $stmt->rowCount();
     }
 
-    public function findById(int $id): ?ScheduledEvent
+    public function findById(int $id, bool $lock = false): ?ScheduledEvent
     {
-        $stmt = $this->pdo->prepare('SELECT * FROM scheduled_events WHERE id = :id');
+        if ($lock && !$this->pdo->inTransaction()) { throw new \LogicException('Event locks require a transaction.'); }
+        $stmt = $this->pdo->prepare('SELECT * FROM scheduled_events WHERE id = :id'
+            . ($lock && $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql' ? ' FOR UPDATE' : ''));
         $stmt->execute(['id' => $id]);
         $row = $stmt->fetch();
 

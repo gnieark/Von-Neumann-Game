@@ -35,7 +35,7 @@ final class FailedMannyMigration
                     else {
                         $probe = $manny->probeId === null ? null : (new NeumannProbeRepository($this->pdo))->findById($manny->probeId);
                         if ($probe === null) { throw new \RuntimeException('Failed Manny has no carrier; resolve its loss before migration: ' . $manny->uid); }
-                        $manny = $this->service->recallFailedTaskForMigration($probe, $manny, (int) $event['id']);
+                        $manny = $this->service->recallFailedTask($probe, $manny, (int) $event['id']);
                         $result['result'] = 'recalled'; $result['taskAfter'] = $manny->currentTask; $result['returnEventId'] = $manny->taskScheduledEventId;
                     }
                 }
