@@ -31,6 +31,8 @@ Ce correctif réutilise les colonnes déjà créées pour la reprise du minage :
 
 Les événements déjà marqués `failed` ne sont pas réactivés au démarrage. Leur reprise demeure une opération administrative explicite, notamment via `scripts/one-shot-scripts/requeue-failed-manny-storage-transactions.php`, après examen de sa simulation et avec sauvegarde lors de l’application.
 
+Un rappel demandé par le joueur annule la tâche en échec selon les règles métier. Si un retour ou une attente de place doit continuer, il reçoit un nouvel événement ; l’ancien événement en échec est conservé pour l’historique. Le rappel ne rejoue pas l’action échouée. Pour un retour déjà engagé, l’échéance et la cargaison sont conservées. Les ingrédients d’une fabrication annulée ne sont restitués qu’une fois, même en cas de rappels simultanés. Cette transition est atomique sous les verrous de Manny et d’événement ; elle ne répare aucune donnée au démarrage.
+
 ## Vérification
 
 - `php tests/SectorTests.php` : conflits après écriture de l’objet, admission, prise de l’événement, acquittement et commit ; imprimante atomique et création de Manny ; conservation des ingrédients et réservations ; délais, alerte, erreurs permanentes, rappels et changement d’identité de fabrication.

@@ -1491,26 +1491,37 @@ final class MannyService implements MannyTaskRuntime
         $candidate = $this->requiredManny($probe, $uid);
         if (in_array($candidate->currentTask, [Manny::TASK_MINING, Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
             return $this->probes->withAdmittedOperation([$probe->id], fn(): Manny => $this->mannies->withMannyLock(
-                $candidate->id, fn(Manny $manny): Manny => $this->recallMannyLocked($this->probes->findById($probe->id), $uid),
+                $candidate->id, fn(Manny $manny): Manny => $this->recallCurrentTask($this->probes->findById($probe->id), $manny),
             ));
         }
         return $this->withMannyOrder($probe, $uid,
             fn(NeumannProbe $lockedProbe): Manny => $this->mannies->withMannyLock(
                 $this->requiredManny($lockedProbe, $uid)->id,
-                fn(Manny $manny): Manny => $this->recallMannyLocked($lockedProbe, $uid),
+                fn(Manny $manny): Manny => $this->recallCurrentTask($lockedProbe, $manny),
             ),
         );
     }
 
-    /** Explicit maintenance entry: caller locks the failed event and owns the receipt transaction. */
-    public function recallFailedTaskForMigration(NeumannProbe $probe, Manny $manny, int $failedEventId): Manny
+    /** Called under the Manny lock: never reuse a failed delivery for a new return. */
+    private function recallCurrentTask(NeumannProbe $probe, Manny $manny): Manny
     {
-        $event = $this->scheduledEvents?->findById($failedEventId);
-        if ($event === null || $event->status !== 'failed' || $event->entityType !== 'manny' || $event->entityId !== $manny->id
-            || $manny->taskScheduledEventId !== $failedEventId) { throw new \LogicException('Maintenance recall requires the current failed Manny task.'); }
+        if ($manny->probeId !== $probe->id) { throw new MannyActionException(404, 'manny_not_found', 'Manny not found.'); }
+        if ($manny->currentTask !== null && $manny->taskScheduledEventId !== null) {
+            $event = $this->scheduledEvents?->findById($manny->taskScheduledEventId, lock: true);
+            if ($event?->status === 'failed') { return $this->recallFailedTask($probe, $manny, $event->id); }
+        }
+        return $this->recallMannyLocked($probe, $manny);
+    }
+
+    /** Caller holds the Manny/event locks and owns the cancellation transaction. */
+    public function recallFailedTask(NeumannProbe $probe, Manny $manny, int $failedEventId): Manny
+    {
+        $event = $this->scheduledEvents?->findById($failedEventId, lock: true);
+        if ($event === null || $event->status !== 'failed' || $event->type !== 'manny.task' || $event->entityType !== 'manny' || $event->entityId !== $manny->id
+            || $manny->probeId !== $probe->id || $manny->taskScheduledEventId !== $failedEventId) { throw new \LogicException('Recall requires the current failed Manny task.'); }
         $this->mannies->loadConsumedItems($manny);
         $manny->taskScheduledEventId = null; // A return must get a new event, never reuse the failed delivery.
-        $result = $this->recallMannyLocked($probe, $manny->uid, $manny);
+        $result = $this->recallMannyLocked($probe, $manny);
         if ($result->currentTask !== null && !in_array($result->currentTask, [Manny::TASK_RETURNING, Manny::TASK_WAITING_FOR_SPACE], true)) {
             throw new \RuntimeException('Failed task could not be cancelled by the business recall.');
         }
@@ -1518,10 +1529,10 @@ final class MannyService implements MannyTaskRuntime
         return $result;
     }
 
-    private function recallMannyLocked(NeumannProbe $probe, string $uid, ?Manny $failedManny = null): Manny
+    private function recallMannyLocked(NeumannProbe $probe, Manny $manny): Manny
     {
         $this->ensureProbeAcceptsMannyOrders($probe);
-        $manny = $failedManny ?? $this->refreshMannyState($this->requiredManny($probe, $uid), $probe);
+        $uid = $manny->uid;
         if (!$manny->isInSameSectorAs($probe) && $this->canRecallRemoteMannyViaScut($probe, $manny)) {
             return $this->abandonRemoteMannyTask($manny);
         }

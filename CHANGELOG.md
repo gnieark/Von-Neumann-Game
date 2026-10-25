@@ -2,9 +2,17 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-25
+
+### Fixed
+
+- Le rappel d’une Manny dont l’événement scheduler est en échec crée désormais un nouvel événement pour son retour ou son attente de place. L’ancien échec reste dans l’historique ; son action n’est pas rejouée. Un retour déjà commencé conserve son échéance et sa cargaison. Les fabrications annulées restituent leurs ingrédients une seule fois, y compris lors de rappels concurrents. La transition s’effectue sous verrous, dans une transaction unique. Contrat API inchangé (v149), aucune migration automatique des données existantes.
+
 ## 2026-10-24
 
 ### Fixed
+
+- Réparation administrative ciblée du retour de `Sonek_001-M001` : nouvel événement de retour, sans rejouer le minage en échec ni recommencer le trajet. Script explicite `scripts/one-shot-scripts/reschedule-sonek-return.php`, simulation par défaut, sauvegarde obligatoire et refus si l’état a changé. Le défaut général du rappel après échec reste à corriger ; contrat API inchangé.
 
 - Scheduler : les conflits SQL temporaires des fabrications Manny et de l’imprimante atomique sont désormais repris automatiquement après rollback complet, comme le minage transactionnel. La reprise conserve les ingrédients déjà consommés au lancement, la réservation et l’identité de fabrication ; elle ne double pas la livraison et respecte rappels et destructions. Délais progressifs plafonnés à cinq minutes, alerte après quinze minutes de conflits et diagnostics internes `scheduler_crafting`. Configuration : `schedulerCraftingRetryDelays` et `schedulerCraftingConflictAlertSeconds`. Les erreurs métier et d’intégrité restent distinctes. Aucune migration de schéma ni modification du contrat API (v149) ; les événements déjà en échec nécessitent toujours une reprise administrative explicite. Détails : `docs/scheduler-sql-retries.md`.
 
