@@ -93,6 +93,7 @@
     }
   },
   "manny": {
+    "maxMiningManniesPerObject": 2000,
     "cargoCapacity": 0.05,
     "containerSpace": 0.05,
     "waitingForSpaceTimeoutSeconds": 604800,

@@ -13,6 +13,7 @@ use VonNeumannGame\Http\ApiResponse;
 use VonNeumannGame\Repository\NeumannProbeRepository;
 use VonNeumannGame\Repository\ProbeItemRepository;
 use VonNeumannGame\Service\MannyService;
+use VonNeumannGame\Service\MannyActionException;
 use VonNeumannGame\Service\OthersActionException;
 use VonNeumannGame\Service\ProbeMovementService;
 use VonNeumannGame\Service\ProbeStorageService;
@@ -186,6 +187,13 @@ final class ProbeManniesApiController
             ];
         }
 
+        $miningObjectIds = [];
+        $miningOnly = true;
+        foreach ($normalizedTasks as $task) {
+            if ($task['task'] !== 'mine') { $miningOnly = false; continue; }
+            if (is_string($task['payload']['objectId'] ?? null)) { $miningObjectIds[] = $task['payload']['objectId']; }
+        }
+
         try {
             $results = $this->mannies->withPreparedBatch(
                 $probe,
@@ -200,7 +208,7 @@ final class ProbeManniesApiController
                                 json_encode($task['payload'], JSON_THROW_ON_ERROR),
                                 $lockedProbe,
                             );
-                        } catch (OthersActionException $error) {
+                        } catch (OthersActionException|MannyActionException $error) {
                             throw new BatchMannyActionRejected($index, ApiResponse::error(
                                 $error->httpStatus,
                                 $error->errorCode,
@@ -215,6 +223,8 @@ final class ProbeManniesApiController
 
                     return $results;
                 },
+                $miningObjectIds,
+                $miningOnly,
             );
         } catch (BatchMannyActionRejected $rejected) {
             $error = $rejected->response->body['error'] ?? [

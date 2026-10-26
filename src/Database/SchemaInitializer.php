@@ -1060,6 +1060,7 @@ final class SchemaInitializer
         ];
         array_push($statements, ...$this->mineableObjectStockStatements());
         array_push($statements, ...$this->miningOrderLockStatements());
+        array_push($statements, ...$this->miningAdmissionLockStatements());
         array_push($statements, ...$this->probeOperationStatements());
         array_push($statements, ...$this->storageMigrationStatements());
         return $this->driver === 'mysql'
@@ -1086,6 +1087,14 @@ final class SchemaInitializer
             "CREATE TABLE IF NOT EXISTS probe_losses (probe_id INTEGER PRIMARY KEY, reason $text NOT NULL, causal_at $text NOT NULL, state $text NOT NULL, replacement_probe_id INTEGER NULL, scheduled_event_id INTEGER NULL, updated_at $text NOT NULL)",
         ];
         return $this->driver === 'mysql' ? array_map(fn(string $sql): string => $this->withMysqlEngine($sql), $statements) : $statements;
+    }
+
+    /** Dedicated to global mining admission; no stock row or owner lifetime coupling. */
+    public function miningAdmissionLockStatements(): array
+    {
+        $identity = $this->driver === 'mysql' ? 'VARCHAR(255) CHARACTER SET ascii COLLATE ascii_bin' : 'TEXT COLLATE BINARY';
+        $sql = "CREATE TABLE IF NOT EXISTS mining_admission_locks (object_id $identity NOT NULL PRIMARY KEY)";
+        return [$this->driver === 'mysql' ? $this->withMysqlEngine($sql) : $sql];
     }
 
     /** Also used by the explicit schema migration; never imports or repairs existing data. */

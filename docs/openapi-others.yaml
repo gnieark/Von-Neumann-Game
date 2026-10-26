@@ -3,7 +3,7 @@ openapi: 3.0.3
 # Internal SQL stock lifecycle/forgotten-Manny migration does not alter public stock representations.
 info:
   title: Von Neumann Game — Others API
-  version: '149'
+  version: '150'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Whenever the rate limiter is consulted and available,

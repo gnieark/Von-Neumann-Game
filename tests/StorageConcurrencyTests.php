@@ -259,6 +259,7 @@ try{
     require __DIR__ . '/Support/MineableObjectStockConcurrencyTests.php';
     require __DIR__ . '/Support/MineableLifecycleConcurrencyTests.php';
     require __DIR__ . '/Support/MiningAtomicConcurrencyTests.php';
+    require __DIR__ . '/Support/MiningCapacityConcurrencyTests.php';
     require __DIR__ . '/Support/ProbeLossConcurrencyTests.php';
     require __DIR__ . '/Support/ForgottenMannyConcurrencyTests.php';
     require __DIR__ . '/Support/MiningRetryConcurrencyTests.php';

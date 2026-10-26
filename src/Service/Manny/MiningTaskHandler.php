@@ -28,6 +28,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
      * @param \Closure(Manny, NeumannProbe): void $ensureMannyInRange
      * @param \Closure(mixed): SectorContent $getOrCreateSector
      * @param \Closure(UniverseObject): bool $isMineableObject
+     * @param \Closure(string): void $ensureMiningCapacity
      * @param \Closure(NeumannProbe, Asteroid, mixed): array<string, float> $availableAsteroidResourceAmountsForOrders
      * @param \Closure(UniverseObject): array<string, float> $resourceComposition
      * @param \Closure(array<string, float>, array<string, float>, float): void $ensureAsteroidHasResources
@@ -62,6 +63,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         private readonly \Closure $ensureMannyInRange,
         private readonly \Closure $getOrCreateSector,
         private readonly \Closure $isMineableObject,
+        private readonly \Closure $ensureMiningCapacity,
         private readonly \Closure $availableAsteroidResourceAmountsForOrders,
         private readonly \Closure $resourceComposition,
         private readonly \Closure $ensureAsteroidHasResources,
@@ -125,6 +127,7 @@ final class MiningTaskHandler implements TaskHandlerInterface
         if ($target === null || !($this->isMineableObject)($target)) {
             throw new MannyActionException(422, 'invalid_mining_target', 'This object cannot be mined by a Manny.');
         }
+        ($this->ensureMiningCapacity)($objectId);
 
         $availableAmounts = $target instanceof Asteroid || $target instanceof DormantConstruct
             ? ($this->availableAsteroidResourceAmountsForOrders)($probe, $target, $taskSector)
