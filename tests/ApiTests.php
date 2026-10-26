@@ -9951,6 +9951,7 @@ $test->assertEquals(2, count($batchStart->body['results'] ?? []), 'Manny task ba
 $test->assertEquals($batchMannyIds[0] ?? null, $batchStart->body['results'][0]['manny']['id'] ?? null, 'first Manny batch result identifies its Manny');
 $test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['manny']['id'] ?? null, 'second Manny batch result identifies its Manny');
 require __DIR__ . '/Support/MiningCapacityApiTests.php';
+require __DIR__ . '/Support/CraftingBatchApiTests.php';
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
 $storageContainerRepositorySource = file_get_contents($root . '/src/Repository/StorageContainerRepository.php');

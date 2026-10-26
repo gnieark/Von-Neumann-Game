@@ -264,6 +264,7 @@ try{
     require __DIR__ . '/Support/ForgottenMannyConcurrencyTests.php';
     require __DIR__ . '/Support/MiningRetryConcurrencyTests.php';
     require __DIR__ . '/Support/CraftingRetryConcurrencyTests.php';
+    require __DIR__ . '/Support/CraftingBatchConcurrencyTests.php';
     require __DIR__ . '/Support/FailedMannyRecallConcurrencyTests.php';
 }finally{
     // Remove only tables bearing this run's unpredictable prefix.

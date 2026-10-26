@@ -298,6 +298,26 @@ final class MannyRepository
         return $row ? $this->hydrate($row) : null;
     }
 
+    /** Lock only the requested batch actors, before inventory roots, in numeric ID order.
+     * Missing/foreign UIDs remain absent so the action can report its original taskIndex.
+     * @param list<string> $uids
+     * @return array<string,Manny>
+     */
+    public function lockBatchActors(int $probeId, array $uids): array
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Batch actors require a transaction.'); }
+        if ($uids === []) { return []; }
+        $uids = array_values(array_unique($uids));
+        $query = $this->pdo->prepare('SELECT id FROM mannies WHERE probe_id=? AND uid IN (' . implode(',', array_fill(0, count($uids), '?')) . ') ORDER BY id');
+        $query->execute([$probeId, ...$uids]);
+        $actors = [];
+        foreach ($query->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            $manny = $this->lockForTask((int) $id);
+            if ($manny !== null && $manny->probeId === $probeId) { $actors[$manny->uid] = $manny; }
+        }
+        return $actors;
+    }
+
     public function findByUid(string $uid): ?Manny
     {
         $stmt = $this->pdo->prepare($this->taskJoinSql('m.uid = :uid'));

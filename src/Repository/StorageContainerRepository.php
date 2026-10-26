@@ -254,29 +254,38 @@ final class StorageContainerRepository
             }
             if ($debits === []) { return 0.0; }
 
-            foreach (array_chunk($debits, 200, true) as $chunk) {
-                $case = []; $guards = []; $parameters = [];
-                foreach ($chunk as $containerId => $taken) {
-                    $case[] = 'WHEN ? THEN CAST(? AS DECIMAL(20,4))';
-                    array_push($parameters, $containerId, $taken);
-                }
-                $parameters[] = gmdate('c');
-                $parameters[] = $resourceType;
-                foreach ($chunk as $containerId => $taken) {
-                    $guards[] = '(container_id=? AND ROUND(amount-reserved_amount,4)>=CAST(? AS DECIMAL(20,4)))';
-                    array_push($parameters, $containerId, $taken);
-                }
-                $update = $this->pdo->prepare('UPDATE storage_container_resources SET amount=ROUND(amount-(CASE container_id ' . implode(' ', $case) . ' ELSE 0 END),4),updated_at=? WHERE resource_type=? AND (' . implode(' OR ', $guards) . ')');
-                $update->execute($parameters);
-                if ($update->rowCount() !== count($chunk)) { throw new \VonNeumannGame\Service\MannyActionException(409, 'storage_reserved', 'Resource stock changed concurrently.'); }
-
-                $ids = array_keys($chunk);
-                $marks = implode(',', array_fill(0, count($ids), '?'));
-                $this->pdo->prepare("UPDATE storage_containers SET storage_version=storage_version+1 WHERE id IN ($marks)")->execute($ids);
-                $this->pdo->prepare("DELETE FROM storage_container_resources WHERE resource_type=? AND amount<=0 AND reserved_amount<=0 AND container_id IN ($marks)")->execute([$resourceType, ...$ids]);
-            }
+            $this->applyResourceDebits($resourceType, $debits);
             return round($amount - max(0.0, $remaining), 4);
         });
+    }
+
+    /** Apply an allocation computed under container locks, retaining conditional stock guards.
+     * @param array<int,float> $debits
+     */
+    public function applyResourceDebits(string $resourceType, array $debits): void
+    {
+        if (!$this->pdo->inTransaction()) { throw new \LogicException('Resource debits require a transaction.'); }
+        foreach (array_chunk($debits, 200, true) as $chunk) {
+            $case = []; $guards = []; $parameters = [];
+            foreach ($chunk as $containerId => $taken) {
+                $case[] = 'WHEN ? THEN CAST(? AS DECIMAL(20,4))';
+                array_push($parameters, $containerId, $taken);
+            }
+            $parameters[] = gmdate('c');
+            $parameters[] = $resourceType;
+            foreach ($chunk as $containerId => $taken) {
+                $guards[] = '(container_id=? AND ROUND(amount-reserved_amount,4)>=CAST(? AS DECIMAL(20,4)))';
+                array_push($parameters, $containerId, $taken);
+            }
+            $update = $this->pdo->prepare('UPDATE storage_container_resources SET amount=ROUND(amount-(CASE container_id ' . implode(' ', $case) . ' ELSE 0 END),4),updated_at=? WHERE resource_type=? AND (' . implode(' OR ', $guards) . ')');
+            $update->execute($parameters);
+            if ($update->rowCount() !== count($chunk)) { throw new \VonNeumannGame\Service\MannyActionException(409, 'storage_reserved', 'Resource stock changed concurrently.'); }
+
+            $ids = array_keys($chunk);
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $this->pdo->prepare("UPDATE storage_containers SET storage_version=storage_version+1 WHERE id IN ($marks)")->execute($ids);
+            $this->pdo->prepare("DELETE FROM storage_container_resources WHERE resource_type=? AND amount<=0 AND reserved_amount<=0 AND container_id IN ($marks)")->execute([$resourceType, ...$ids]);
+        }
     }
 
     public function delete(StorageContainer $container): void
