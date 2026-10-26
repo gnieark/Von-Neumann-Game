@@ -4,6 +4,12 @@ Toutes les modifications notables de Von Neumann Game seront documentées ici, a
 
 ## 2026-10-26
 
+### Fixed
+
+- Acceptation accélérée des lots composés uniquement de fabrications Manny : inventaire et occupation des conteneurs chargés une fois sous verrous, puis actualisés après chaque ordre. Les recettes restent évaluées séquentiellement, avec débits conditionnels, réservations et rollback intégral ; les lots mixtes et les événements individuels du scheduler conservent leur fonctionnement. Contrat API inchangé (v150), aucune migration. Tests de concurrence SQLite/MariaDB et benchmark reproductible : `docs/crafting-batches.md`.
+
+- Annulation administrative ciblée du dépôt de Lena `action_3294c625f8ab5ce2e8b5` : libération de 94 404 ECE réservées et retour de l’auxiliaire à bord, sans modifier les quantités de l’inventaire. Script explicite `scripts/one-shot-scripts/cancel-lena-depot-deposit.php`, simulation par défaut, répétition transactionnelle avec rollback via `--rehearse`, sauvegarde obligatoire avant écriture et refus si l’état a changé. L’action, le transfert et l’événement scheduler sont annulés ensemble. Aucun nouvel endpoint ni changement du contrat API.
+
 ### Changed
 
 - API **v150** : plafond global de **2 000 Mannies par objet minable**, configurable via `manny.maxMiningManniesPerObject`. Tous les joueurs, sondes, ressources et conteneurs de destination partagent ce plafond, y compris pour les petites planètes et épaves Others. Les trajets, attentes de stockage et minages en échec occupent une place tant que la tâche reste un minage ; rappel, fin ou destruction la libèrent. Les tâches existantes au-dessus du plafond sont conservées. Les nouveaux ordres saturés renvoient HTTP 409 `mining_target_capacity_reached` ; un batch refusé est entièrement annulé et identifie son membre fautif. Admission transactionnelle par objet, verrous acquis dans un ordre stable et comptage partagé dans les batches composés uniquement de minages, sans verrou supplémentaire au traitement scheduler. Migration additive explicite sous maintenance avant déploiement : `php scripts/one-shot-scripts/migrate-mining-admission-locks.php --database-config=PATH --apply` (simulation par défaut). Aucun stock ni ordre existant n'est transformé. Détails : `docs/mining-capacity.md`.

@@ -117,6 +117,9 @@ final class MannyService implements MannyTaskRuntime
     private array $preparedMiningObjects = [];
     /** Only pure mining batches can reuse counts: mixed actions may release other miners. @var array<string, int>|null */
     private ?array $preparedMiningCounts = null;
+    private ?CraftingBatchInventory $craftingBatch = null;
+    /** @var array<string,Manny> */
+    private array $preparedCraftingMannies = [];
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -825,6 +828,12 @@ final class MannyService implements MannyTaskRuntime
     /** Historic orders keep their probe envelope but also fence the actual actor. */
     private function withMannyOrder(NeumannProbe $probe, string $uid, callable $callback): mixed
     {
+        if ($this->craftingBatch !== null) {
+            $this->craftingBatch->assertProbe($probe);
+            $this->requiredManny($probe, $uid);
+            // Probe, requested actors and inventory are already locked for the complete batch.
+            return $callback($this->probes->findById($probe->id) ?? throw new \RuntimeException('Crafting probe disappeared.'));
+        }
         return $this->withProbeLock($probe, function (NeumannProbe $currentProbe) use ($uid, $callback): mixed {
             $id = $this->requiredManny($currentProbe, $uid)->id;
             return $this->mannies->withMannyLock($id, function (Manny $current) use ($currentProbe, $callback): mixed {
@@ -865,26 +874,39 @@ final class MannyService implements MannyTaskRuntime
      * @param callable(NeumannProbe): T $callback
      * @param list<string> $miningObjectIds
      * @param bool $miningOnly True only when every member starts mining and none releases a task.
+     * @param list<string> $craftingMannyUids Nonempty only when every member starts ordinary Manny crafting.
      * @return T
      */
-    public function withPreparedBatch(NeumannProbe $probe, callable $callback, array $miningObjectIds, bool $miningOnly): mixed
+    public function withPreparedBatch(NeumannProbe $probe, callable $callback, array $miningObjectIds, bool $miningOnly, array $craftingMannyUids = []): mixed
     {
         if ($this->preparedBatchProbeId !== null) {
             throw new \LogicException('A Manny task batch is already being prepared.');
         }
 
-        return $this->probes->withAdmittedOperation([$probe->id], function () use ($probe, $callback, $miningObjectIds, $miningOnly): mixed {
+        if ($craftingMannyUids !== [] && ($miningOnly || $miningObjectIds !== [])) {
+            throw new \LogicException('Crafting inventory cannot be shared with other batch actions.');
+        }
+        return $this->probes->withAdmittedOperation([$probe->id], function () use ($probe, $callback, $miningObjectIds, $miningOnly, $craftingMannyUids): mixed {
             $this->mannies->lockMiningAdmissions($miningObjectIds);
             $lockedProbe = $this->probes->findById($probe->id) ?? throw new \RuntimeException("Probe disappeared after admission.");
             $this->preparedBatchProbeId = $lockedProbe->id;
             $this->preparedMiningObjects = array_fill_keys($miningObjectIds, true);
             $this->preparedMiningCounts = $miningOnly ? [] : null;
             try {
+                if ($craftingMannyUids !== []) {
+                    return $this->withProbeLock($lockedProbe, function (NeumannProbe $currentProbe) use ($callback, $craftingMannyUids): mixed {
+                        $this->preparedCraftingMannies = $this->mannies->lockBatchActors($currentProbe->id, $craftingMannyUids);
+                        $this->craftingBatch = $this->storage->prepareCraftingBatch($currentProbe);
+                        return $callback($currentProbe);
+                    });
+                }
                 return $callback($lockedProbe);
             } finally {
                 $this->preparedBatchProbeId = null;
                 $this->preparedMiningObjects = [];
                 $this->preparedMiningCounts = null;
+                $this->craftingBatch = null;
+                $this->preparedCraftingMannies = [];
             }
         });
     }
@@ -1054,9 +1076,9 @@ final class MannyService implements MannyTaskRuntime
         if ($recipeDefinition === null || !$this->crafting->recipeCraftableBy($recipeDefinition, CraftingRecipeCatalog::FABRICATOR_MANNY)) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
         }
-        $craftingPlan = $this->crafting->craftingPlan($probe, $recipeDefinition);
+        $craftingPlan = $this->crafting->craftingPlan($probe, $recipeDefinition, $this->craftingBatch);
         $freeAfterConsumption = round(
-            $this->freeCargoCapacity($probe)
+            $this->storage->freeCargoCapacity($probe, $this->craftingBatch)
             + $this->crafting->cargoSpaceFreedByResourceCosts($craftingPlan['resourceCosts'])
             + $this->crafting->cargoSpaceFreedByConsumedItems($craftingPlan['consumedItems']),
             4,
@@ -1066,11 +1088,11 @@ final class MannyService implements MannyTaskRuntime
         }
 
         $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $this->crafting->consumeCraftingPlan($probe, $craftingPlan);
+        $this->crafting->consumeCraftingPlan($probe, $craftingPlan, $this->craftingBatch);
 
         $reservedCargoType = (string) ($craftingPlan['output']['type'] ?? '');
         $reservedCargoSpace = round(max(0.0, (float) ($craftingPlan['output']['containerSpace'] ?? 0.0)), 4);
-        $reservedStorageContainerId = $this->storage->reserveCraftingOutput($probe, $reservedCargoType, $reservedCargoSpace);
+        $reservedStorageContainerId = $this->storage->reserveCraftingOutput($probe, $reservedCargoType, $reservedCargoSpace, $this->craftingBatch);
 
         $manny->currentTask = Manny::TASK_CRAFTING;
         $manny->taskStartedAt = $now->format('c');
@@ -2046,6 +2068,11 @@ final class MannyService implements MannyTaskRuntime
 
     private function requiredManny(NeumannProbe $probe, string $uid): Manny
     {
+        if ($this->craftingBatch !== null) {
+            $this->craftingBatch->assertProbe($probe);
+            return $this->preparedCraftingMannies[$uid]
+                ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
+        }
         return $this->mannies->findByUidForProbe($probe->id, $uid)
             ?? throw new MannyActionException(404, 'manny_not_found', 'Manny not found.');
     }

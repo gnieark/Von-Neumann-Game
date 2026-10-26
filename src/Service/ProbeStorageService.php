@@ -509,8 +509,9 @@ final class ProbeStorageService
         return $accepted;
     }
 
-    public function consumeResource(NeumannProbe $probe, string $type, float $amount): float
+    public function consumeResource(NeumannProbe $probe, string $type, float $amount, ?CraftingBatchInventory $batch = null): float
     {
+        $batch?->assertProbe($probe);
         $type = $this->normalizeResourceType($type);
         $amount = round(max(0.0, $amount), 4);
         if ($amount <= 0.0) {
@@ -524,6 +525,12 @@ final class ProbeStorageService
             return $consumed;
         }
 
+        if ($batch !== null) {
+            $debits = $batch->resourceDebits($type, $amount);
+            $this->containers->applyResourceDebits($type, $debits);
+            $batch->consumeResources($type, $debits);
+            return round(array_sum($debits), 4);
+        }
         $this->ensureProbeStorage($probe);
         return $this->containers->consumeAvailableResource($probe->id, $type, $amount);
     }
@@ -544,12 +551,14 @@ final class ProbeStorageService
         return $this->containers->consumeAvailableResource($probe->id, $type, $amount, $container->id);
     }
 
-    public function resourceStock(NeumannProbe $probe, string $type): float
+    public function resourceStock(NeumannProbe $probe, string $type, ?CraftingBatchInventory $batch = null): float
     {
+        $batch?->assertProbe($probe);
         $type = $this->normalizeResourceType($type);
         if ($type === ResourceComposition::DEUTERIUM) {
             return round(max(0.0, $probe->deuteriumStock / ResourceComposition::DEUTERIUM_TANK_POINTS_PER_ECE), 4);
         }
+        if ($batch !== null) { return $batch->resourceStock($type); }
 
         $this->ensureProbeStorage($probe);
         $total = 0.0;
@@ -603,11 +612,33 @@ final class ProbeStorageService
         return ['container'=>$container,'available'=>$this->freeCapacityForContainer($probe,$container)];
     }
 
-    public function freeCargoCapacity(NeumannProbe $probe): float
+    public function prepareCraftingBatch(NeumannProbe $probe): CraftingBatchInventory
     {
+        // The caller already owns the probe and all batch Manny locks. Keep actor -> inventory order.
+        $this->containers->lockForMannyPlacement($probe->id);
         $this->ensureProbeStorage($probe);
-        $containers = $this->containers->findByProbeId($probe->id);
-        $used = $this->usedCapacityByContainer($probe, $containers, $this->mannies->findByProbeId($probe->id), $this->items->findByProbeId($probe->id));
+        $incomingItems = [];
+        $capacity = $this->capacitySnapshot($probe, incomingItems: $incomingItems);
+        return new CraftingBatchInventory(
+            $probe->id,
+            $capacity,
+            $this->containers->resourceAmountsByContainer($probe->id, true),
+            $this->items->findConsumableByProbeId($probe->id),
+            $incomingItems,
+        );
+    }
+
+    public function freeCargoCapacity(NeumannProbe $probe, ?CraftingBatchInventory $batch = null): float
+    {
+        $batch?->assertProbe($probe);
+        if ($batch !== null) {
+            $containers = $batch->capacity['containers'];
+            $used = $batch->capacity['used'];
+        } else {
+            $this->ensureProbeStorage($probe);
+            $containers = $this->containers->findByProbeId($probe->id);
+            $used = $this->usedCapacityByContainer($probe, $containers, $this->mannies->findByProbeId($probe->id), $this->items->findByProbeId($probe->id));
+        }
 
         return round(array_reduce(
             $containers,
@@ -616,12 +647,15 @@ final class ProbeStorageService
         ), 4);
     }
 
-    public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space): ?int
+    public function reserveCraftingOutput(NeumannProbe $probe, string $type, float $space, ?CraftingBatchInventory $batch = null): ?int
     {
-        $this->containers->lockForMannyPlacement($probe->id);
+        $batch?->assertProbe($probe);
+        if ($batch === null) { $this->containers->lockForMannyPlacement($probe->id); }
         $space = round(max(0.0, $space), 4);
-        return ($this->placeUnit($probe, $type, $space)
-            ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.'))->id;
+        $container = $this->placeUnit($probe, $type, $space, $batch?->capacity)
+            ?? throw new MannyActionException(422, 'insufficient_cargo_capacity', 'Insufficient probe cargo capacity for the crafted item.');
+        $batch?->reserveOutput($container->id, $space);
+        return $container->id;
     }
 
     /**
@@ -1597,9 +1631,10 @@ final class ProbeStorageService
     /**
      * Loads every component of cargo occupancy once for a placement operation.
      *
+     * @param array<string,array<int,float>>|null $incomingItems Optional per-item incoming reservations for batch consumption.
      * @return array{containers:array<StorageContainer>, used:array<int,float>, incoming:array<int,float>}
      */
-    private function capacitySnapshot(NeumannProbe $probe, ?int $ignoredStorageMoveMannyId = null): array
+    private function capacitySnapshot(NeumannProbe $probe, ?int $ignoredStorageMoveMannyId = null, ?array &$incomingItems = null): array
     {
         $containers = $this->containers->findByProbeId($probe->id);
         $mannies = $this->mannies->findByProbeId($probe->id);
@@ -1613,6 +1648,7 @@ final class ProbeStorageService
                 $mannies,
                 $items,
                 $ignoredStorageMoveMannyId,
+                $incomingItems,
             ),
         ];
     }
@@ -1632,6 +1668,7 @@ final class ProbeStorageService
      * @param array<StorageContainer> $containers
      * @param array<Manny> $mannies
      * @param array<ProbeItem> $items
+     * @param array<string,array<int,float>>|null $incomingItems Optional output populated for internal item moves.
      * @return array<int, float>
      */
     private function reservedIncomingCapacityByContainer(
@@ -1639,6 +1676,7 @@ final class ProbeStorageService
         array $mannies,
         array $items,
         ?int $ignoredStorageMoveMannyId = null,
+        ?array &$incomingItems = null,
     ): array {
         $incoming = array_fill_keys(array_map(static fn(StorageContainer $container): int => $container->id, $containers), 0.0);
         $containerIdsByUid = [];
@@ -1678,6 +1716,9 @@ final class ProbeStorageService
                     $item = $itemsByUid[$uid] ?? null;
                     if ($item !== null && $item->storageContainerId !== $toId) {
                         $incoming[$toId] = round($incoming[$toId] + max(0.0, $item->containerSpace), 4);
+                        if ($incomingItems !== null) {
+                            $incomingItems[$uid][$toId] = round(($incomingItems[$uid][$toId] ?? 0.0) + max(0.0, $item->containerSpace), 4);
+                        }
                     }
                 }
                 continue;
@@ -1761,10 +1802,10 @@ final class ProbeStorageService
         return array_values(array_unique($values));
     }
 
-    private function placeUnit(NeumannProbe $probe, string $type, float $space): ?StorageContainer
+    private function placeUnit(NeumannProbe $probe, string $type, float $space, ?array $snapshot = null): ?StorageContainer
     {
         $space = round(max(0.0, $space), 4);
-        $snapshot = $this->capacitySnapshot($probe);
+        $snapshot ??= $this->capacitySnapshot($probe);
         foreach ($this->placementCandidatesFrom($snapshot['containers'], $type) as $container) {
             if ($this->freeCapacityFromSnapshot($container, $snapshot) + self::EPSILON >= $space) {
                 return $container;

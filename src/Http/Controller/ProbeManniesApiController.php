@@ -189,7 +189,9 @@ final class ProbeManniesApiController
 
         $miningObjectIds = [];
         $miningOnly = true;
+        $craftingOnly = true;
         foreach ($normalizedTasks as $task) {
+            if ($task['task'] !== 'craft') { $craftingOnly = false; }
             if ($task['task'] !== 'mine') { $miningOnly = false; continue; }
             if (is_string($task['payload']['objectId'] ?? null)) { $miningObjectIds[] = $task['payload']['objectId']; }
         }
@@ -225,6 +227,7 @@ final class ProbeManniesApiController
                 },
                 $miningObjectIds,
                 $miningOnly,
+                $craftingOnly ? array_column($normalizedTasks, 'mannyId') : [],
             );
         } catch (BatchMannyActionRejected $rejected) {
             $error = $rejected->response->body['error'] ?? [

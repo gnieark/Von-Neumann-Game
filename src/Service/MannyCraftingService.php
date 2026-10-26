@@ -44,8 +44,9 @@ final class MannyCraftingService
      * @param array<string, mixed> $recipeDefinition
      * @return array<string, mixed>
      */
-    public function craftingPlan(NeumannProbe $probe, array $recipeDefinition): array
+    public function craftingPlan(NeumannProbe $probe, array $recipeDefinition, ?CraftingBatchInventory $batch = null): array
     {
+        $batch?->assertProbe($probe);
         $output = $recipeDefinition['output'] ?? null;
         if (!is_array($output) || !isset($output['type'])) {
             throw new MannyActionException(400, 'invalid_recipe', 'Unknown crafting recipe.');
@@ -54,7 +55,7 @@ final class MannyCraftingService
         $resourceCosts = [];
         $itemsToConsume = [];
         $consumedItems = [];
-        $itemsByType = $this->probeItemsByType($probe);
+        $itemsByType = $batch?->itemsByType ?? $this->probeItemsByType($probe);
         $durationSeconds = $this->resolveCraftingRecipe(
             $recipeDefinition,
             $itemsByType,
@@ -63,7 +64,7 @@ final class MannyCraftingService
             $resourceCosts,
         );
 
-        $this->ensureResourceCostsAvailable($probe, $resourceCosts);
+        $this->ensureResourceCostsAvailable($probe, $resourceCosts, $batch);
 
         return [
             'durationSeconds' => $durationSeconds,
@@ -223,17 +224,19 @@ final class MannyCraftingService
     /**
      * @param array<string, mixed> $craftingPlan
      */
-    public function consumeCraftingPlan(NeumannProbe $probe, array $craftingPlan): void
+    public function consumeCraftingPlan(NeumannProbe $probe, array $craftingPlan, ?CraftingBatchInventory $batch = null): void
     {
+        $batch?->assertProbe($probe);
         $resourceCosts = is_array($craftingPlan['resourceCosts'] ?? null) ? $craftingPlan['resourceCosts'] : [];
         foreach ($resourceCosts as $type => $quantity) {
-            $this->subtractResourceFromProbe($probe, (string) $type, (float) $quantity);
+            $this->subtractResourceFromProbe($probe, (string) $type, (float) $quantity, $batch);
         }
 
         $itemsToConsume = is_array($craftingPlan['itemsToConsume'] ?? null) ? $craftingPlan['itemsToConsume'] : [];
         foreach ($itemsToConsume as $item) {
             if ($item instanceof ProbeItem) {
                 $this->items->delete($item);
+                $batch?->consumeItem($item);
             }
         }
     }
@@ -536,23 +539,23 @@ final class MannyCraftingService
     /**
      * @param array<string, float> $resourceCosts
      */
-    private function ensureResourceCostsAvailable(NeumannProbe $probe, array $resourceCosts): void
+    private function ensureResourceCostsAvailable(NeumannProbe $probe, array $resourceCosts, ?CraftingBatchInventory $batch = null): void
     {
         foreach ($resourceCosts as $type => $quantity) {
-            if ($this->storage->resourceStock($probe, $type) + 0.00001 < $quantity) {
+            if ($this->storage->resourceStock($probe, $type, $batch) + 0.00001 < $quantity) {
                 throw new MannyActionException(422, 'insufficient_' . $type, 'Insufficient resources in probe inventory for this recipe.');
             }
         }
     }
 
-    private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity): void
+    private function subtractResourceFromProbe(NeumannProbe $probe, string $type, float $quantity, ?CraftingBatchInventory $batch = null): void
     {
         $quantity = round(max(0.0, $quantity), 4);
         if ($quantity <= 0.0) {
             return;
         }
 
-        $this->storage->consumeResource($probe, $type, $quantity);
+        $this->storage->consumeResource($probe, $type, $quantity, $batch);
     }
 
     private function createCraftedManny(NeumannProbe $probe, Manny $craftingManny, \DateTimeImmutable $now): void
