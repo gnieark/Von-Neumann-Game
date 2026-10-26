@@ -4840,7 +4840,7 @@ $test->assertEquals(404, $missingDefaultProbe->status, 'PATCH /api/probe/{probeI
 
 $apiVersion = $kernel->handle('GET', '/api/version');
 $test->assertEquals(200, $apiVersion->status, 'GET /api/version is public');
-$test->assertEquals(149, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
+$test->assertEquals(150, $apiVersion->body['apiVersion'] ?? null, 'GET /api/version exposes the current API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiDocument['info']['version'] ?? null, 'main OpenAPI version matches the public API version');
 $test->assertEquals((string) ($apiVersion->body['apiVersion'] ?? ''), $openApiOthersDocument['info']['version'] ?? null, 'Others OpenAPI version matches the public API version');
 $test->assertEquals($apiVersion->body['apiVersion'] ?? null, $openApiDocument['paths']['/api/version']['get']['responses']['200']['content']['application/json']['example']['apiVersion'] ?? null, 'OpenAPI version example matches the public API response');
@@ -9950,6 +9950,7 @@ $test->assertEquals(202, $batchStart->status, 'POST /api/probe/{probeId}/mannies
 $test->assertEquals(2, count($batchStart->body['results'] ?? []), 'Manny task batch returns one ordered result per request');
 $test->assertEquals($batchMannyIds[0] ?? null, $batchStart->body['results'][0]['manny']['id'] ?? null, 'first Manny batch result identifies its Manny');
 $test->assertEquals($batchMannyIds[1] ?? null, $batchStart->body['results'][1]['manny']['id'] ?? null, 'second Manny batch result identifies its Manny');
+require __DIR__ . '/Support/MiningCapacityApiTests.php';
 $mannyServiceSource = file_get_contents($root . '/src/Service/MannyService.php');
 $probeStorageServiceSource = file_get_contents($root . '/src/Service/ProbeStorageService.php');
 $storageContainerRepositorySource = file_get_contents($root . '/src/Repository/StorageContainerRepository.php');

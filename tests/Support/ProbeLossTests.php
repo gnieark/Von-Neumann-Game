@@ -78,7 +78,7 @@ require_once __DIR__ . '/ProbeLossFixture.php';
     try { $f['mining']->startMining($nested, $nestedManny->uid, $rock->getId(), 'metals', 0.1); $test->assert(false, 'nested admission refused'); }
     catch (LogicException) { $test->assert($db->inTransaction(), 'nested admission refuses without committing the caller transaction'); }
     finally { $db->rollBack(); }
-    $f['mining']->withPreparedBatch($nested, fn() => $f['mining']->startMining($nested, $nestedManny->uid, $rock->getId(), 'metals', 0.1));
+    $f['mining']->withPreparedBatch($nested, fn() => $f['mining']->startMining($nested, $nestedManny->uid, $rock->getId(), 'metals', 0.1), [$rock->getId()], true);
     $test->assertEquals(Manny::TASK_MINING, $f['mannies']->findById($nestedManny->id)->currentTask, 'batch owner admits before the transaction and reuses its ticket');
     [$batchProbe, $batchManny] = miningAtomicActor($f, 'loss-batch-rollback', $sector);
     $db->exec('CREATE TRIGGER fail_batch_manny BEFORE UPDATE ON mannies WHEN OLD.id=' . $batchManny->id . " AND NEW.current_task='mining' BEGIN SELECT RAISE(ABORT,'injected batch member failure'); END");
@@ -86,7 +86,7 @@ require_once __DIR__ . '/ProbeLossFixture.php';
     $f['mining']->withPreparedBatch($batchProbe, function () use ($f, $batchProbe, $batchManny, $rock): void {
         try { $f['mining']->startMining($batchProbe, $batchManny->uid, $rock->getId(), 'metals', 0.1); }
         catch (PDOException) { /* An API batch reports the refused member and continues. */ }
-    });
+    }, [$rock->getId()], true);
     $db->exec('DROP TRIGGER fail_batch_manny');
     $test->assertEquals($beforeEvents, (int) $db->query('SELECT COUNT(*) FROM scheduled_events')->fetchColumn(), 'caught batch-member failure rolls back its event instead of committing orphan work');
     $test->assertEquals(null, $f['mannies']->findById($batchManny->id)->currentTask, 'caught batch-member failure preserves the actor');

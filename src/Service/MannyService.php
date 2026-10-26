@@ -113,6 +113,10 @@ final class MannyService implements MannyTaskRuntime
     private readonly StorageMoveTaskHandler $storageMoveTaskHandler;
     private readonly WaypointBookmarkInstallationTaskHandler $waypointBookmarkInstallationTaskHandler;
     private ?int $preparedBatchProbeId = null;
+    /** @var array<string, true> */
+    private array $preparedMiningObjects = [];
+    /** Only pure mining batches can reuse counts: mixed actions may release other miners. @var array<string, int>|null */
+    private ?array $preparedMiningCounts = null;
 
     public function __construct(
         private readonly MannyRepository $mannies,
@@ -167,6 +171,7 @@ final class MannyService implements MannyTaskRuntime
             },
             fn(mixed $sectorCoordinates): SectorContent => $this->sectors->getOrCreateSector($sectorCoordinates),
             fn(UniverseObject $target): bool => $this->isMineableObject($target),
+            function (string $objectId): void { $this->ensureMiningCapacity($objectId); },
             fn(NeumannProbe $probe, UniverseObject $object, mixed $sectorCoordinates): array => $this->availableAsteroidResourceAmountsForOrders($probe, $object, $sectorCoordinates),
             fn(UniverseObject $target): array => $this->resourceComposition($target),
             function (array $availableAmounts, array $resourceProfile, float $targetAmount): void {
@@ -854,24 +859,32 @@ final class MannyService implements MannyTaskRuntime
     /**
      * Admits a Manny task batch before its owning transaction. Pre-existing tasks remain
      * authoritative until their scheduled events are processed by the worker.
+     * Declare all mining targets up front so batches cannot acquire roots in opposite orders.
      *
      * @template T
      * @param callable(NeumannProbe): T $callback
+     * @param list<string> $miningObjectIds
+     * @param bool $miningOnly True only when every member starts mining and none releases a task.
      * @return T
      */
-    public function withPreparedBatch(NeumannProbe $probe, callable $callback): mixed
+    public function withPreparedBatch(NeumannProbe $probe, callable $callback, array $miningObjectIds, bool $miningOnly): mixed
     {
         if ($this->preparedBatchProbeId !== null) {
             throw new \LogicException('A Manny task batch is already being prepared.');
         }
 
-        return $this->probes->withAdmittedOperation([$probe->id], function () use ($probe, $callback): mixed {
+        return $this->probes->withAdmittedOperation([$probe->id], function () use ($probe, $callback, $miningObjectIds, $miningOnly): mixed {
+            $this->mannies->lockMiningAdmissions($miningObjectIds);
             $lockedProbe = $this->probes->findById($probe->id) ?? throw new \RuntimeException("Probe disappeared after admission.");
             $this->preparedBatchProbeId = $lockedProbe->id;
+            $this->preparedMiningObjects = array_fill_keys($miningObjectIds, true);
+            $this->preparedMiningCounts = $miningOnly ? [] : null;
             try {
                 return $callback($lockedProbe);
             } finally {
                 $this->preparedBatchProbeId = null;
+                $this->preparedMiningObjects = [];
+                $this->preparedMiningCounts = null;
             }
         });
     }
@@ -961,11 +974,29 @@ final class MannyService implements MannyTaskRuntime
 
     private function startMiningLocked(NeumannProbe $probe, string $uid, string $objectId, string|array $resourceTypes, float $targetAmount, ?string $targetContainerId = null): Manny
     {
-        $this->mannies->lockMiningOrders($probe->id, $objectId);
-        return $this->mannies->withMannyLock($this->requiredManny($probe, $uid)->id, function (Manny $manny) use ($probe, $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId): Manny {
+        if ($this->preparedBatchProbeId !== null) {
+            if ($this->preparedBatchProbeId !== $probe->id || !isset($this->preparedMiningObjects[$objectId])) {
+                throw new \LogicException('Batch mining targets must be locked before processing any member.');
+            }
+        } else {
+            $this->mannies->lockMiningAdmissions([$objectId]);
+        }
+        $result = $this->mannies->withMannyLock($this->requiredManny($probe, $uid)->id, function (Manny $manny) use ($probe, $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId): Manny {
             if ($manny->probeId !== $probe->id) { throw new MannyActionException(404, 'manny_not_found', 'Manny not found.'); }
             return $this->miningTaskHandler->start($probe, $uid, $objectId, $resourceTypes, $targetAmount, $targetContainerId);
         });
+        if ($this->preparedMiningCounts !== null) { $this->preparedMiningCounts[$objectId]++; }
+        return $result;
+    }
+
+    private function ensureMiningCapacity(string $objectId): void
+    {
+        $count = $this->preparedMiningCounts[$objectId] ?? $this->mannies->countMiningAssignments($objectId);
+        if ($this->preparedMiningCounts !== null) { $this->preparedMiningCounts[$objectId] = $count; }
+        $limit = max(1, Config::int($this->config, 'manny.maxMiningManniesPerObject', 2000));
+        if ($count >= $limit) {
+            throw new MannyActionException(409, 'mining_target_capacity_reached', 'The limit of ' . $limit . ' mining Mannies on this object has been reached.');
+        }
     }
 
     public function startMotorizingAsteroid(NeumannProbe $probe, string $uid, string $objectId): Manny

@@ -2,6 +2,12 @@
 
 Toutes les modifications notables de Von Neumann Game seront documentées ici, avec une attention particulière aux changements qui peuvent impacter les frontends et les intégrations API.
 
+## 2026-10-26
+
+### Changed
+
+- API **v150** : plafond global de **2 000 Mannies par objet minable**, configurable via `manny.maxMiningManniesPerObject`. Tous les joueurs, sondes, ressources et conteneurs de destination partagent ce plafond, y compris pour les petites planètes et épaves Others. Les trajets, attentes de stockage et minages en échec occupent une place tant que la tâche reste un minage ; rappel, fin ou destruction la libèrent. Les tâches existantes au-dessus du plafond sont conservées. Les nouveaux ordres saturés renvoient HTTP 409 `mining_target_capacity_reached` ; un batch refusé est entièrement annulé et identifie son membre fautif. Admission transactionnelle par objet, verrous acquis dans un ordre stable et comptage partagé dans les batches composés uniquement de minages, sans verrou supplémentaire au traitement scheduler. Migration additive explicite sous maintenance avant déploiement : `php scripts/one-shot-scripts/migrate-mining-admission-locks.php --database-config=PATH --apply` (simulation par défaut). Aucun stock ni ordre existant n'est transformé. Détails : `docs/mining-capacity.md`.
+
 ## 2026-10-25
 
 ### Fixed

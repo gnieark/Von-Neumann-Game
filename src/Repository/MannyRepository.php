@@ -393,16 +393,34 @@ final class MannyRepository
         return (new \VonNeumannGame\Database\StorageTransaction($this->pdo, maxAttempts: 1, readCommitted: true))->run($operation);
     }
 
-    /** Admission serializes same-probe commitments only, never reserves source stock. */
-    public function lockMiningOrders(int $probeId, string $objectId): void
+    /**
+     * Admission only: never lock source stock or scheduler events. Acquire all batch roots first.
+     * @param list<string> $objectIds
+     */
+    public function lockMiningAdmissions(array $objectIds): void
     {
         if (!$this->pdo->inTransaction()) { throw new \LogicException('Mining orders require a transaction.'); }
-        MineableObjectStockRepository::validateId($objectId);
-        $sql = 'INSERT INTO mining_order_locks(probe_id,object_id) VALUES(?,?)';
+        $objectIds = array_values(array_unique($objectIds));
+        sort($objectIds, SORT_STRING);
+        foreach ($objectIds as $objectId) { MineableObjectStockRepository::validateId($objectId); }
+        $sql = 'INSERT INTO mining_admission_locks(object_id) VALUES(?)';
         $sql .= $this->pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
-            ? ' ON DUPLICATE KEY UPDATE probe_id=VALUES(probe_id)'
-            : ' ON CONFLICT(probe_id,object_id) DO UPDATE SET probe_id=excluded.probe_id';
-        $this->pdo->prepare($sql)->execute([$probeId, $objectId]);
+            ? ' ON DUPLICATE KEY UPDATE object_id=VALUES(object_id)'
+            : ' ON CONFLICT(object_id) DO UPDATE SET object_id=excluded.object_id';
+        $statement = $this->pdo->prepare($sql);
+        foreach ($objectIds as $objectId) { $statement->execute([$objectId]); }
+    }
+
+    /** Indexed by object; failed events and storage waits occupy a slot until the task changes. */
+    public function countMiningAssignments(string $objectId): int
+    {
+        $statement = $this->pdo->prepare(
+            "SELECT COUNT(*) FROM manny_tasks mt
+             INNER JOIN mannies m ON m.id = mt.manny_id AND m.task_scheduled_event_id = mt.scheduled_event_id
+             WHERE mt.object_id = ? AND mt.task_type = 'mining' AND m.current_task = 'mining'"
+        );
+        $statement->execute([$objectId]);
+        return (int) $statement->fetchColumn();
     }
 
     public function nameExistsForProbe(int $probeId, string $name, ?int $exceptId = null): bool

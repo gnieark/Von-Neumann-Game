@@ -2,7 +2,7 @@ openapi: 3.0.3
 # Internal SQL stock lifecycle/forgotten-Manny migration does not alter public stock representations.
 info:
   title: Von Neumann Game API
-  version: '149'
+  version: '150'
   description: >
     Authenticated endpoints are rate-limited per bearer token using a shared
     sliding window. Whenever the rate limiter is consulted and available,
@@ -359,7 +359,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiVersionResponse'
               example:
-                apiVersion: 149
+                apiVersion: 150
         '405':
           $ref: '#/components/responses/MethodNotAllowed'
   /api/session:
@@ -2342,6 +2342,9 @@ paths:
         batch is atomic: if one task is rejected, none of its tasks are
         retained. An error identifies the rejected zero-based `taskIndex` and
         its `mannyId`. A Manny may occur only once in a batch.
+        Mining shares a per-object limit of 2000 Mannies by default across all
+        probes and players. Exceeding it returns 409 `mining_target_capacity_reached`
+        and rolls back the entire batch.
         `ignite_missile` requires `payload.targetId` and accepts an optional
         `payload.missileItemId`; when omitted, each task reserves the first
         missile still available in the probe inventory. Its result contains
@@ -2384,7 +2387,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: At least one Manny or the probe is unavailable
+          description: At least one Manny or the probe is unavailable, or a mining target has reached its capacity
           content:
             application/json:
               schema:
@@ -2521,6 +2524,13 @@ paths:
         sector covered by the same SCUT network can receive this order for its
         own sector only when targetContainerId identifies a detached container
         in that Manny sector.
+        Every mineable object (including small planets and Others mothership
+        wrecks) accepts at most 2000 mining Mannies by default, shared by all
+        probes and players; the server administrator can configure this limit.
+        A slot is occupied from order acceptance until the Manny leaves its
+        mining task, including travel, storage waits and scheduler failures.
+        Recall or task completion releases the slot. Existing tasks above the
+        limit are preserved; new orders are refused until capacity is available.
       parameters:
         - $ref: '#/components/parameters/MannyId'
       requestBody:
@@ -2550,7 +2560,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '409':
-          description: Manny unavailable
+          description: Manny unavailable, or mining_target_capacity_reached when the object has no mining slot left
           content:
             application/json:
               schema:
@@ -6630,7 +6640,7 @@ components:
           properties:
             code:
               type: string
-              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, probe_integrity_too_low, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_asteroid_motorization_components, distributed_thrust_anchoring_unavailable, asteroid_already_motorized, asteroid_motorization_already_scheduled, asteroid_motor_already_full, asteroid_refueling_already_scheduled, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, asteroid_not_found, asteroid_not_motorized, asteroid_motor_empty, asteroid_trajectory_already_active, asteroid_trajectory_not_found, asteroid_temporarily_occluded, invalid_asteroid_trajectory_mode, invalid_asteroid_impact_target, invalid_asteroid_target_speed, invalid_neighbor_sector, system_impact_black_hole_forbidden, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, blueprint_not_found, blueprint_not_known, recipient_probe_not_found, invalid_blueprint_recipient, probes_not_in_same_scut_network, internal_error]
+              enum: [bad_request, invalid_probe_model, unauthorized, forbidden, not_found, method_not_allowed, insufficient_scan_data, sensors_unavailable, probe_already_moving, probe_dead, probe_trapped_by_black_hole, probe_reassignment_unavailable, probe_integrity_too_low, insufficient_fuel, same_destination, mission_not_found, mission_not_abandonable, manny_not_found, target_probe_not_found, duplicate_manny_name, manny_busy, manny_out_of_range, manny_not_on_probe, probe_integrity_full, probe_deuterium_full, insufficient_metals, insufficient_ice, insufficient_carbon_compounds, insufficient_deuterium, insufficient_asteroid_motorization_components, distributed_thrust_anchoring_unavailable, asteroid_already_motorized, asteroid_motorization_already_scheduled, asteroid_motor_already_full, asteroid_refueling_already_scheduled, insufficient_crafting_ingredients, invalid_recipe, atomic_printer_busy, no_available_manny, invalid_mining_target, mining_target_capacity_reached, invalid_salvage_target, invalid_storage_container, storage_container_not_detachable, invalid_asteroid_target, asteroid_not_found, asteroid_not_motorized, asteroid_motor_empty, asteroid_trajectory_already_active, asteroid_trajectory_not_found, asteroid_temporarily_occluded, invalid_asteroid_trajectory_mode, invalid_asteroid_impact_target, invalid_asteroid_target_speed, invalid_neighbor_sector, system_impact_black_hole_forbidden, invalid_sector_object_target, invalid_planet_target, missing_atmospheric_drop_kit, detached_container_not_found, detached_container_not_recoverable, deuterium_refuel_station_not_found, scut_relay_not_found, scut_relay_not_in_sector, scut_relay_already_on, scut_relay_requires_star, scut_transit_beacon_already_installed, missing_electronic_card, missing_scut_transit_beacon, resource_unavailable, insufficient_target_resources, insufficient_cargo_capacity, item_not_jettisonable, item_not_movable, invalid_storage_move, storage_container_not_found, nothing_to_jettison, insufficient_inventory_amount, waypoint_bookmark_not_found, bookmark_target_not_found, invalid_bookmark_target, invalid_message_recipient, probe_not_in_same_sector, blueprint_not_found, blueprint_not_known, recipient_probe_not_found, invalid_blueprint_recipient, probes_not_in_same_scut_network, internal_error]
             message:
               type: string
     ApiVersionResponse:
